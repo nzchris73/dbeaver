@@ -54,6 +54,7 @@ import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.ModelPreferences;
 import org.jkiss.dbeaver.model.*;
+import org.jkiss.dbeaver.model.app.DBPPlatformEclipse;
 import org.jkiss.dbeaver.model.app.DBPProject;
 import org.jkiss.dbeaver.model.data.DBDAttributeBinding;
 import org.jkiss.dbeaver.model.data.DBDDataFilter;
@@ -289,7 +290,7 @@ public class SQLEditor extends SQLEditorBase implements
     {
         IFile file = EditorUtils.getFileFromInput(getEditorInput());
         return file == null ?
-            DBWorkbench.getPlatform().getWorkspace().getActiveProject() : DBWorkbench.getPlatform().getWorkspace().getProject(file.getProject());
+            DBWorkbench.getPlatform().getWorkspace().getActiveProject() : DBPPlatformEclipse.getInstance().getWorkspace().getProject(file.getProject());
     }
 
     @Nullable
@@ -2363,10 +2364,9 @@ public class SQLEditor extends SQLEditorBase implements
         }
 
         if (!export) {
-            // We only need to prompt user to close extra (unpinned) tabs if:
-            // 1. The user is not executing query in a new tab
-            // 2. The user is executing script that may open several result sets
-            if (!newTab && !isSingleQuery) {
+            // We only need to prompt user to close extra (unpinned) tabs if
+            // the user is not executing query in a new tab
+            if (!newTab) {
                 int tabsClosed = closeExtraResultTabs(null, true, false);
                 if (tabsClosed == IDialogConstants.CANCEL_ID) {
                     return false;

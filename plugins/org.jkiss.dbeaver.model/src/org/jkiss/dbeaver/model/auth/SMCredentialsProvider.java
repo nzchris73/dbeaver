@@ -14,25 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.jkiss.dbeaver.model.auth;
 
-import org.jkiss.code.NotNull;
-import org.jkiss.dbeaver.DBException;
-import org.jkiss.dbeaver.model.DBPDataSourceContainer;
-import org.jkiss.dbeaver.model.connection.DBPConnectionConfiguration;
-import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.code.Nullable;
 
 /**
- * Auth credentials provider.
+ * Security manager credentials provider.
  */
-public interface SMAuthCredentialsProvider {
-
+public interface SMCredentialsProvider {
     /**
-     * Fill credential parameters in the specified container and configuration.
-     * Returns false on auth cancel. True otherwise.
+     * @return null if the user is not authorized
      */
-    boolean provideAuthParameters(@NotNull DBRProgressMonitor monitor, @NotNull DBPDataSourceContainer dataSourceContainer, @NotNull DBPConnectionConfiguration configuration)
-        throws DBException;
-
+    @Nullable
+    SMCredentials getActiveUserCredentials();
 }
