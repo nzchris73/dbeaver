@@ -42,9 +42,7 @@ import org.jkiss.dbeaver.model.rm.RMConstants;
 import org.jkiss.dbeaver.model.struct.DBSObject;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.runtime.ui.UIServiceConnections;
-import org.jkiss.dbeaver.runtime.ui.UIServiceSQL;
 import org.jkiss.dbeaver.ui.IRefreshablePart;
-import org.jkiss.dbeaver.ui.UITextUtils;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.controls.folders.ITabbedFolderContainer;
 import org.jkiss.dbeaver.ui.editors.*;
@@ -56,6 +54,7 @@ import org.jkiss.dbeaver.ui.navigator.NavigatorPreferences;
 import org.jkiss.dbeaver.ui.navigator.NavigatorUtils;
 import org.jkiss.dbeaver.utils.RuntimeUtils;
 import org.jkiss.utils.CommonUtils;
+import org.jkiss.utils.StringUtils;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
@@ -85,13 +84,7 @@ public class NavigatorHandlerObjectOpen extends NavigatorHandlerObjectBase imple
             }
             for (Object element : structSelection) {
                 DBNNode node = null;
-                if (element instanceof IResource resource && "sql".equals(resource.getFileExtension())) {
-                    UIServiceSQL serviceSQL = DBWorkbench.getService(UIServiceSQL.class);
-                    if (serviceSQL != null) {
-                        serviceSQL.openResource(resource);
-                    }
-                    continue;
-                } else if (element instanceof DBNNode n) {
+                if (element instanceof DBNNode n) {
                     node = n;
                 } else {
                     DBSObject object = RuntimeUtils.getObjectAdapter(element, DBSObject.class);
@@ -101,6 +94,8 @@ public class NavigatorHandlerObjectOpen extends NavigatorHandlerObjectBase imple
                 }
                 if (node != null) {
                     NavigatorUtils.openNavigatorNode(node, HandlerUtil.getActiveWorkbenchWindow(event), event.getParameters());
+                } else {
+                    log.debug("Unsupported object type: " + element);
                 }
             }
         }
@@ -348,7 +343,7 @@ public class NavigatorHandlerObjectOpen extends NavigatorHandlerObjectBase imple
                     label = NLS.bind(actionName, UINavigatorMessages.actions_navigator__objects);
                 } else {
                     if (node.getAdapter(IResource.class) != null) {
-                        label = actionName + " '" + UITextUtils.truncateText(node.getNodeDisplayName(), 32) + "'"; //$NON-NLS-1$
+                        label = actionName + " '" + StringUtils.truncateText(node.getNodeDisplayName(), 32) + "'"; //$NON-NLS-1$
                     } else {
                         label = NLS.bind(actionName, node.getNodeTypeLabel()); //$NON-NLS-1$
                     }

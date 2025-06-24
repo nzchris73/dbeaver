@@ -102,8 +102,6 @@ public interface DBPDataSourceContainer extends
      */
     boolean isExternallyProvided();
 
-    boolean isTemplate();
-
     /**
      * Temporary datasources are not saved in project. They exist until project refresh or application shutdown
      */
@@ -127,6 +125,11 @@ public interface DBPDataSourceContainer extends
     void setSelectedSharedCredentials(@NotNull DBSSecretValue secretValue);
 
     boolean isConnectionReadOnly();
+
+    /**
+     * Updates read-only param in data source.
+     */
+    void setConnectionReadOnly(boolean connectionReadOnly);
 
     /**
      * Flag saying that password value was saved in configuration.

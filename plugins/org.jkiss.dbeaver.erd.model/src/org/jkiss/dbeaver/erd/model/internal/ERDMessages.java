@@ -1,7 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
- * Copyright (C) 2011-2012 Eugene Fradkin (eugene.fradkin@gmail.com)
+ * Copyright (C) 2010-2025 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +20,18 @@ package org.jkiss.dbeaver.erd.model.internal;
 import org.jkiss.dbeaver.utils.NLS;
 
 public class ERDMessages extends NLS {
-	static final String BUNDLE_NAME = "org.jkiss.dbeaver.erd.model.internal.ERDMessages"; //$NON-NLS-1$
+    static final String BUNDLE_NAME = "org.jkiss.dbeaver.erd.model.internal.ERDMessages"; //$NON-NLS-1$
 
     static {
-		// initialize resource bundle
-		NLS.initializeMessages(BUNDLE_NAME, ERDMessages.class);
-	}
+        // initialize resource bundle
+        NLS.initializeMessages(BUNDLE_NAME, ERDMessages.class);
+    }
 
-	public static String erd_attribute_visibility_selection_item_all;
-	public static String erd_attribute_visibility_selection_item_any_keys;
-	public static String erd_attribute_visibility_selection_item_none;
-	public static String erd_attribute_visibility_selection_item_primary_key;
+    public static String erd_attribute_visibility_selection_item_all;
+    public static String erd_attribute_visibility_selection_item_any_keys;
+    public static String erd_attribute_visibility_selection_item_none;
+    public static String erd_attribute_visibility_selection_item_primary_key;
 
-	private ERDMessages() {
-	}
+    private ERDMessages() {
+    }
 }

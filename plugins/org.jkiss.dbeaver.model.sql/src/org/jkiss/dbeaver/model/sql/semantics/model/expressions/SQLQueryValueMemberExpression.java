@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2025 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,14 @@ import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.impl.struct.RelationalObjectType;
 import org.jkiss.dbeaver.model.sql.semantics.*;
 import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryDataContext;
 import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryExprType;
 import org.jkiss.dbeaver.model.sql.semantics.model.SQLQueryMemberAccessEntry;
 import org.jkiss.dbeaver.model.sql.semantics.model.SQLQueryNodeModelVisitor;
+import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsDataContext;
+import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsSourceContext;
 import org.jkiss.dbeaver.model.stm.STMTreeNode;
 
 /**
@@ -75,13 +78,40 @@ public class SQLQueryValueMemberExpression extends SQLQueryValueExpression {
     @Override
     protected void propagateContextImpl(@NotNull SQLQueryDataContext context, @NotNull SQLQueryRecognitionContext statistics) {
         this.owner.propagateContext(context, statistics);
+        this.resolveTypeImpl(statistics);
+    }
 
+    @Override
+    protected void resolveRowSourcesImpl(@NotNull SQLQueryRowsSourceContext context, @NotNull SQLQueryRecognitionContext statistics) {
+        this.owner.resolveRowSources(context, statistics);
+    }
+
+    @Override
+    protected SQLQueryExprType resolveValueTypeImpl(
+        @NotNull SQLQueryRowsDataContext context,
+        @NotNull SQLQueryRecognitionContext statistics
+    ) {
+        this.resolveTypeImpl(statistics);
+        return this.type;
+    }
+
+    private void resolveTypeImpl(@NotNull SQLQueryRecognitionContext statistics) {
         SQLQuerySymbolOrigin memberOrigin = new SQLQuerySymbolOrigin.MemberOfType(this.owner.getValueType());
 
         if (this.identifier == null) {
             this.type = SQLQueryExprType.UNKNOWN;
             if (this.memberAccessEntry != null) {
-                this.memberAccessEntry.setOrigin(memberOrigin);
+                if (this.owner instanceof SQLQueryValueColumnReferenceExpression c && c.getColumnName() != null
+                    && c.getColumnName().getDefinition() instanceof SQLQuerySymbolByDbObjectDefinition dbObj
+                ) {
+                    // TODO refactor column reference recognition to include this case
+                    this.memberAccessEntry.setOrigin(
+                        new SQLQuerySymbolOrigin.DbObjectFromDbObject(dbObj.getDbObject(),
+                            RelationalObjectType.TYPE_UNKNOWN)
+                    );
+                } else {
+                    this.memberAccessEntry.setOrigin(memberOrigin);
+                }
             }
         } else if (this.identifier.isNotClassified()) {
             SQLQueryExprType type = tryResolveMemberReference(statistics, this.owner.getValueType(), this.identifier, memberOrigin);

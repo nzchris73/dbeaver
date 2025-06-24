@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2025 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,6 +145,8 @@ public class CSmartCombo<ITEM_TYPE> extends Composite {
         for (int arrowEvent : arrowEvents) {
             this.arrow.addListener(arrowEvent, this.listener);
         }
+
+        UIUtils.asyncExec(() -> layout(true, true));
     }
 
     public void setTableFilter(TableFilter<ITEM_TYPE> tableFilter) {
@@ -508,7 +510,7 @@ public class CSmartCombo<ITEM_TYPE> extends Composite {
                 itemForeground = ((IColorProvider) labelProvider).getForeground(item);
             }
             if (itemBackground != null && itemForeground == null) {
-                itemForeground = UIUtils.getContrastColor(itemBackground);
+                itemForeground = UIStyles.getContrastColor(itemBackground);
             }
             TreeItem newItem = new TreeItem(table, SWT.NONE);
             newItem.setData(item);

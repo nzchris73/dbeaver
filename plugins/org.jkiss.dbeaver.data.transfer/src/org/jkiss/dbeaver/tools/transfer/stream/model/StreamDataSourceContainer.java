@@ -59,7 +59,7 @@ import java.util.Map;
 /**
  * Data container transfer producer
  */
-class StreamDataSourceContainer implements DBPDataSourceContainer {
+public class StreamDataSourceContainer implements DBPDataSourceContainer {
 
     private static final Log log = Log.getLog(StreamDataSourceContainer.class);
 
@@ -136,11 +136,6 @@ class StreamDataSourceContainer implements DBPDataSourceContainer {
     }
 
     @Override
-    public boolean isTemplate() {
-        return false;
-    }
-
-    @Override
     public boolean isTemporary() {
         return true;
     }
@@ -153,6 +148,11 @@ class StreamDataSourceContainer implements DBPDataSourceContainer {
     @Override
     public boolean isConnectionReadOnly() {
         return true;
+    }
+
+    @Override
+    public void setConnectionReadOnly(boolean connectionReadOnly) {
+        
     }
 
     @Override
@@ -339,6 +339,7 @@ class StreamDataSourceContainer implements DBPDataSourceContainer {
     @NotNull
     @Override
     public DBPDataSourceRegistry getRegistry() {
+        // Mustn't be called
         return null;
     }
 

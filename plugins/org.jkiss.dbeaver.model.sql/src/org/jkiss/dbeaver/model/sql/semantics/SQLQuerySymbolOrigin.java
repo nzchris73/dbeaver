@@ -17,10 +17,17 @@
 package org.jkiss.dbeaver.model.sql.semantics;
 
 import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryDataContext;
 import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryExprType;
 import org.jkiss.dbeaver.model.sql.semantics.context.SourceResolutionResult;
+import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsDataContext;
+import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsSourceContext;
+import org.jkiss.dbeaver.model.stm.STMTreeNode;
 import org.jkiss.dbeaver.model.struct.DBSObject;
+import org.jkiss.dbeaver.model.struct.DBSObjectType;
+
+import java.util.Set;
 
 /**
  * The origin providing symbols occurring as identifiers in a query text (actually faced with or potential)
@@ -43,6 +50,19 @@ public abstract class SQLQuerySymbolOrigin {
         void visitMemberOfType(MemberOfType origin);
 
         void visitDataContextSymbol(DataContextSymbolOrigin origin);
+
+        /**
+         * Visitor for * or table-alias.* which are supposed to be expanded to the list of columns on completion
+         */
+        void visitExpandableTupleRef(ExpandableTupleRef tupleRef);
+
+        void visitRowsSourceRef(RowsSourceRef rowsSourceRef);
+
+        void visitRowsDataRef(RowsDataRef rowsDataRef);
+
+        void visitExpandableRowsTupleRef(ExpandableRowsTupleRef tupleRef);
+
+        void visitColumnNameFromRowsData(ColumnNameFromRowsData origin);
     }
 
     public abstract boolean isChained();
@@ -77,14 +97,29 @@ public abstract class SQLQuerySymbolOrigin {
      */
     public static class DbObjectFromDbObject extends SQLQuerySymbolOrigin {
 
+        @NotNull
         private final DBSObject object;
 
-        public DbObjectFromDbObject(DBSObject object) {
-            this.object = object;
+        @NotNull
+        private final Set<DBSObjectType> objectTypes;
+
+        public DbObjectFromDbObject(@NotNull DBSObject object, @NotNull DBSObjectType memberType) {
+            this(object, Set.of(memberType));
         }
 
+        public DbObjectFromDbObject(@NotNull DBSObject object, @NotNull Set<DBSObjectType> objectTypes) {
+            this.object = object;
+            this.objectTypes = objectTypes;
+        }
+
+        @NotNull
         public DBSObject getObject() {
             return this.object;
+        }
+
+        @NotNull
+        public Set<DBSObjectType> getMemberTypes() {
+            return this.objectTypes;
         }
 
         @Override
@@ -103,8 +138,35 @@ public abstract class SQLQuerySymbolOrigin {
      */
     public static class DbObjectFromContext extends DataContextSymbolOrigin {
 
-        public DbObjectFromContext(SQLQueryDataContext dataContext) {
+        @NotNull
+        private final Set<DBSObjectType> objectTypes;
+
+        private final boolean includingRowsets;
+
+        public DbObjectFromContext(
+            @NotNull SQLQueryDataContext dataContext,
+            @NotNull DBSObjectType objectType
+        ) {
+            this(dataContext, Set.of(objectType), false);
+        }
+
+        public DbObjectFromContext(
+            @NotNull SQLQueryDataContext dataContext,
+            @NotNull Set<DBSObjectType> objectTypes,
+            boolean includingRowsets
+        ) {
             super(dataContext);
+            this.objectTypes = objectTypes;
+            this.includingRowsets = includingRowsets;
+        }
+
+        @NotNull
+        public Set<DBSObjectType> getObjectTypes() {
+            return this.objectTypes;
+        }
+        
+        public boolean isIncludingRowsets() {
+            return this.includingRowsets;
         }
 
         @Override
@@ -195,6 +257,7 @@ public abstract class SQLQuerySymbolOrigin {
             this.type = type;
         }
 
+        @NotNull
         public final SQLQueryExprType getType() {
             return this.type;
         }
@@ -209,4 +272,153 @@ public abstract class SQLQuerySymbolOrigin {
             visitor.visitMemberOfType(this);
         }
     }
+
+    /**
+     * Placeholder is a reference to a columns subset provided by the referencedSource or to a complete tuple columns set
+     */
+    public static class ExpandableTupleRef extends DataContextSymbolOrigin {
+
+        @NotNull
+        private final STMTreeNode placeholder;
+
+        @Nullable
+
+        private final SourceResolutionResult referencedSource;
+
+        public ExpandableTupleRef(
+            @NotNull STMTreeNode placeholder,
+            @NotNull SQLQueryDataContext dataContext,
+            @Nullable SourceResolutionResult referencedSource
+        ) {
+            super(dataContext);
+            this.placeholder = placeholder;
+            this.referencedSource = referencedSource;
+        }
+
+        @Override
+        public boolean isChained() {
+            return true;
+        }
+
+        @NotNull
+        public STMTreeNode getPlaceholder() {
+            return this.placeholder;
+        }
+
+        @Nullable
+        public SourceResolutionResult getRowsSource() {
+            return this.referencedSource;
+        }
+
+        @Override
+        public void apply(Visitor visitor) {
+            visitor.visitExpandableTupleRef(this);
+        }
+    }
+
+    public static class RowsSourceRef extends SQLQuerySymbolOrigin {
+
+        @NotNull
+        private final SQLQueryRowsSourceContext rowsSourceContext;
+
+        public RowsSourceRef(@NotNull SQLQueryRowsSourceContext rowsSourceContext) {
+            this.rowsSourceContext = rowsSourceContext;
+        }
+
+        public boolean isChained() {
+            return false;
+        }
+
+        public @NotNull SQLQueryRowsSourceContext getRowsSourceContext() {
+            return this.rowsSourceContext;
+        }
+
+        @Override
+        public void apply(Visitor visitor) {
+            visitor.visitRowsSourceRef(this);
+        }
+    }
+
+    public static class RowsDataRef extends SQLQuerySymbolOrigin {
+        
+        @NotNull
+        private final SQLQueryRowsDataContext rowsDataContext;
+
+        public RowsDataRef(@NotNull SQLQueryRowsDataContext rowsDataContext) {
+            this.rowsDataContext = rowsDataContext;
+        }
+
+        public boolean isChained() {
+            return false;
+        }
+
+        @NotNull
+        public SQLQueryRowsDataContext getRowsDataContext() {
+            return this.rowsDataContext;
+        }
+
+        @Override
+        public void apply(Visitor visitor) {
+            visitor.visitRowsDataRef(this);
+        }
+    }
+
+    /**
+     * Context is a scope for strictly simple separate column name
+     */
+    public static class ColumnNameFromRowsData extends RowsDataRef {
+
+        public ColumnNameFromRowsData(@NotNull SQLQueryRowsDataContext dataContext) {
+            super(dataContext);
+        }
+
+        @Override
+        public void apply(Visitor visitor) {
+            visitor.visitColumnNameFromRowsData(this);
+        }
+    }
+
+    /**
+     * Placeholder is a reference to a columns subset provided by the referencedSource or to all columns of the rows data
+     */
+    public static class ExpandableRowsTupleRef extends RowsDataRef {
+
+        @NotNull
+        private final STMTreeNode placeholder;
+
+        @Nullable
+        private final SourceResolutionResult referencedSource;
+
+        public ExpandableRowsTupleRef(
+            @NotNull STMTreeNode placeholder,
+            @NotNull SQLQueryRowsDataContext dataContext,
+            @Nullable SourceResolutionResult referencedSource
+        ) {
+            super(dataContext);
+            this.placeholder = placeholder;
+            this.referencedSource = referencedSource;
+        }
+
+        @Override
+        public boolean isChained() {
+            return true;
+        }
+
+        @NotNull
+        public STMTreeNode getPlaceholder() {
+            return this.placeholder;
+        }
+
+        @Nullable
+        public SourceResolutionResult getReferencedSource() {
+            return this.referencedSource;
+        }
+
+        @Override
+        public void apply(Visitor visitor) {
+            visitor.visitExpandableRowsTupleRef(this);
+        }
+    }
+
+
 }

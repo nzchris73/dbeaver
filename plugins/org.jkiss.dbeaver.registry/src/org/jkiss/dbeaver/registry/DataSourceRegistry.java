@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2025 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -348,12 +348,15 @@ public class DataSourceRegistry<T extends DataSourceDescriptor> implements DBPDa
     }
 
     @Override
-    public void moveFolder(@NotNull String oldPath, @NotNull String newPath) {
+    public void moveFolder(@NotNull String oldPath, @NotNull String newPath) throws DBException {
         DBPDataSourceFolder folder = getFolder(oldPath);
         var result = Path.of(newPath);
         var newName = result.getFileName().toString();
         var parent = result.getParent();
         var parentFolder = parent == null ? null : getFolder(parent.toString().replace("\\", "/"));
+        if (folder == parentFolder) {
+            throw new DBException("Cannot move folder inside itself");
+        }
         folder.setParent(parentFolder);
         if (!CommonUtils.equalObjects(folder.getName(), newName)) {
             folder.setName(newName);
@@ -375,7 +378,7 @@ public class DataSourceRegistry<T extends DataSourceDescriptor> implements DBPDa
         return findFolderByPath(path, true, null);
     }
 
-    DataSourceFolder findFolderByPath(String path, boolean create, ParseResults results) {
+    DataSourceFolder findFolderByPath(String path, boolean create, DataSourceParseResults results) {
         DataSourceFolder parent = null;
         for (String name : path.split("/")) {
             DataSourceFolder folder = parent == null ? findRootFolder(name) : parent.getChild(name);
@@ -807,7 +810,7 @@ public class DataSourceRegistry<T extends DataSourceDescriptor> implements DBPDa
         savedFilters.clear();
 
         // Parse datasources
-        ParseResults parseResults = new ParseResults();
+        DataSourceParseResults parseResults = new DataSourceParseResults();
         // Modern way - search json configs in metadata folder
         for (DBPDataSourceConfigurationStorage cfgStorage : storages) {
             if (loadDataSources(cfgStorage, manager, dataSourceIds, parseResults)) {
@@ -873,7 +876,7 @@ public class DataSourceRegistry<T extends DataSourceDescriptor> implements DBPDa
         @NotNull DBPDataSourceConfigurationStorage storage,
         @NotNull DataSourceConfigurationManager manager,
         @Nullable Collection<String> dataSourceIds,
-        @NotNull ParseResults parseResults
+        @NotNull DataSourceParseResults parseResults
     ) {
         boolean configChanged = false;
         try {
@@ -1060,13 +1063,6 @@ public class DataSourceRegistry<T extends DataSourceDescriptor> implements DBPDa
     ) {
         return new DataSourceDescriptor(this, dbpDataSourceConfigurationStorage, origin, id, originalDriver,
             substitutedDriver, dbpConnectionConfiguration);
-    }
-
-    protected static class ParseResults {
-        public Set<DBPDataSourceContainer> updatedDataSources = new LinkedHashSet<>();
-        public Set<DBPDataSourceContainer> addedDataSources = new LinkedHashSet<>();
-        public Set<DBPDataSourceFolder> addedFolders = new LinkedHashSet<>();
-        public Set<DBPDataSourceFolder> updatedFolders = new LinkedHashSet<>();
     }
 
     private class DisconnectTask implements DBRRunnableWithProgress {

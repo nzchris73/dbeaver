@@ -1,7 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
- * Copyright (C) 2011-2012 Eugene Fradkin (eugene.fradkin@gmail.com)
+ * Copyright (C) 2010-2025 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,11 +28,10 @@ import org.eclipse.jface.viewers.*;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.dnd.TextTransfer;
-import org.eclipse.swt.events.MouseAdapter;
-import org.eclipse.swt.events.MouseEvent;
-import org.eclipse.swt.events.TraverseListener;
+import org.eclipse.swt.events.*;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.*;
 import org.jkiss.code.NotNull;
@@ -191,7 +189,8 @@ public abstract class ObjectListControl<OBJECT_TYPE> extends ProgressPageControl
                 }
             }
         });
-        itemsViewer.getControl().addListener(SWT.PaintItem, new PaintListener());
+        itemsViewer.getControl().addListener(SWT.PaintItem, new ItemPaintListener());
+        itemsViewer.getControl().addPaintListener(new ListPaintListener());
         GridData gd = new GridData(GridData.FILL_BOTH);
         itemsViewer.getControl().setLayoutData(gd);
         //PropertiesContributor.getInstance().addLazyListener(this);
@@ -1267,7 +1266,7 @@ public abstract class ObjectListControl<OBJECT_TYPE> extends ProgressPageControl
         }
     }
 
-    class PaintListener implements Listener {
+    class ItemPaintListener implements Listener {
 
         @Override
         public void handleEvent(Event e) {
@@ -1638,6 +1637,43 @@ public abstract class ObjectListControl<OBJECT_TYPE> extends ProgressPageControl
         @Override
         public String toString() {
             return (groupingKey != null ? "Grouped by: " + groupingKey.toString() + ". " : "") + "Elements amount: " + groupedElements.size();
+        }
+    }
+
+    private class ListPaintListener implements PaintListener {
+        private int tickCount = 0;
+        @Override
+        public void paintControl(PaintEvent e) {
+            if (ObjectListControl.this.isLoading()) {
+                Image image = DBeaverIcons.getImage(UIIcon.LOADING.get(tickCount % UIIcon.LOADING.size()));
+                Rectangle bounds = getControl().getBounds();
+                Rectangle ext = image.getBounds();
+
+
+                e.gc.drawImage(image,
+                    (bounds.width - ext.width) / 2,
+                    (bounds.height - ext.height) / 2);
+                new AbstractUIJob("Progress painter") {
+                    @Override
+                    protected IStatus runInUIThread(DBRProgressMonitor monitor) {
+                        if (ObjectListControl.this.isLoading()) {
+                            tickCount++;
+                            getControl().redraw();
+                        }
+                        return Status.OK_STATUS;
+                    }
+                }.schedule();
+                return;
+            }
+            boolean isEmpty;
+            if (isTree) {
+                isEmpty = ObjectListControl.this.getTree().getItemCount() == 0;
+            } else {
+                isEmpty = ObjectListControl.this.getTable().getItemCount() == 0;
+            }
+            if (isEmpty) {
+                UIUtils.drawMessageOverControl(itemsViewer.getControl(), e.gc, "No items", 0);
+            }
         }
     }
 }
