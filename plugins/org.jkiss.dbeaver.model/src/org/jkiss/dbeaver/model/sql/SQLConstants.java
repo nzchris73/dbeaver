@@ -40,6 +40,7 @@ public class SQLConstants {
     public static final String DOT = ".";
 
     public static final String KEYWORD_SELECT = "SELECT";
+    public static final String KEYWORD_SEL = "SEL";
     public static final String KEYWORD_INSERT = "INSERT";
     public static final String KEYWORD_UPDATE = "UPDATE";
     public static final String KEYWORD_DELETE = "DELETE";
@@ -86,6 +87,7 @@ public class SQLConstants {
     public static final String KEYWORD_USING = "USING";
 
     public static final String DATA_TYPE_VARCHAR = "varchar";
+    public static final String DATA_TYPE_NVARCHAR = "nvarchar";
     public static final String DATA_TYPE_BIGINT = "BIGINT";
     public static final String DATA_TYPE_BINARY = "BINARY";
     public static final String DATA_TYPE_BOOLEAN = "BOOLEAN";
@@ -163,8 +165,6 @@ public class SQLConstants {
         "CASCADED",
         KEYWORD_CASE,
         "CAST",
-        "CEIL",
-        "CEILING",
         "CHARACTER",
         "CHECK",
         "CLOSE",
@@ -324,6 +324,7 @@ public class SQLConstants {
         "SEARCH",
         "SECOND",
         KEYWORD_SELECT,
+        KEYWORD_SEL,
         "SENSITIVE",
         "SESSION_USER",
         KEYWORD_SET,

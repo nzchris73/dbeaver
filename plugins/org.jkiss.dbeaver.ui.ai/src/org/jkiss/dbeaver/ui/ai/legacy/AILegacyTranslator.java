@@ -25,17 +25,17 @@ import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.ui.handlers.HandlerUtil;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBPDataSourceContainer;
-import org.jkiss.dbeaver.model.ai.AIAssistant;
-import org.jkiss.dbeaver.model.ai.AICompletionSettings;
-import org.jkiss.dbeaver.model.ai.AIConstants;
-import org.jkiss.dbeaver.model.ai.AITranslateRequest;
+import org.jkiss.dbeaver.model.ai.*;
 import org.jkiss.dbeaver.model.ai.engine.AIDatabaseContext;
+import org.jkiss.dbeaver.model.ai.prompt.AIPromptAbstract;
+import org.jkiss.dbeaver.model.ai.prompt.AIPromptGenerateSql;
 import org.jkiss.dbeaver.model.ai.registry.AIAssistantRegistry;
-import org.jkiss.dbeaver.model.ai.registry.AISettingsRegistry;
+import org.jkiss.dbeaver.model.ai.registry.AISettingsManager;
+import org.jkiss.dbeaver.model.ai.utils.AIUtils;
 import org.jkiss.dbeaver.model.app.DBPWorkspace;
 import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
-import org.jkiss.dbeaver.model.exec.DBCExecutionContextDefaults;
 import org.jkiss.dbeaver.model.logical.DBSLogicalDataSource;
 import org.jkiss.dbeaver.model.qm.QMTranslationHistoryItem;
 import org.jkiss.dbeaver.model.sql.SQLScriptElement;
@@ -45,24 +45,24 @@ import org.jkiss.dbeaver.ui.ai.AIUIUtils;
 import org.jkiss.dbeaver.ui.ai.internal.AIFeatures;
 import org.jkiss.dbeaver.ui.ai.preferences.AIPreferencePageMain;
 import org.jkiss.dbeaver.ui.editors.sql.SQLEditor;
-import org.jkiss.dbeaver.utils.RuntimeUtils;
 import org.jkiss.utils.CommonUtils;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class AILegacyTranslator {
+    private static final Log log = Log.getLog(AILegacyTranslator.class);
 
     public void performAiTranslation(ExecutionEvent event) {
         // CE legacy popup
         AIFeatures.SQL_AI_POPUP.use();
 
-        if (AISettingsRegistry.getInstance().getSettings().isAiDisabled()) {
+        if (AISettingsManager.getInstance().getSettings().isAiDisabled()) {
             return;
         }
-        SQLEditor editor = RuntimeUtils.getObjectAdapter(HandlerUtil.getActiveEditor(event), SQLEditor.class);
-        if (editor == null) {
+        if (!(HandlerUtil.getActiveEditor(event) instanceof SQLEditor editor)) {
             return;
         }
         DBPDataSourceContainer dataSourceContainer = editor.getDataSourceContainer();
@@ -77,11 +77,10 @@ public class AILegacyTranslator {
         }
 
         try {
-            AIAssistant aiAssistant = AIAssistantRegistry.getInstance().createAssistant(dataSourceContainer.getProject().getWorkspace());
-            if (!aiAssistant.hasValidConfiguration()) {
+            if (!AIUtils.hasValidConfiguration()) {
                 UIUtils.showPreferencesFor(
                     editor.getSite().getShell(),
-                    AISettingsRegistry.getInstance().getSettings(),
+                    AISettingsManager.getInstance().getSettings(),
                     AIPreferencePageMain.PAGE_ID
                 );
                 return;
@@ -94,7 +93,7 @@ public class AILegacyTranslator {
                 return;
             }
 
-            DBSLogicalDataSource lDataSource = createLogicalDataSource(dataSourceContainer, executionContext);
+            DBSLogicalDataSource lDataSource = DBSLogicalDataSource.createLogicalDataSource(dataSourceContainer, executionContext);
 
             AISuggestionPopup aiCompletionPopup = new AISuggestionPopup(
                 HandlerUtil.getActiveShell(event),
@@ -109,24 +108,6 @@ public class AILegacyTranslator {
         } catch (Exception e) {
             DBWorkbench.getPlatformUI().showError("AI error", "Cannot determine AI engine", e);
         }
-    }
-
-    @NotNull
-    private static DBSLogicalDataSource createLogicalDataSource(
-        DBPDataSourceContainer dataSourceContainer,
-        DBCExecutionContext executionContext
-    ) {
-        DBSLogicalDataSource lDataSource = new DBSLogicalDataSource(dataSourceContainer, "AI logical wrapper", null);
-        DBCExecutionContextDefaults<?, ?> contextDefaults = executionContext.getContextDefaults();
-        if (contextDefaults != null) {
-            if (contextDefaults.getDefaultCatalog() != null) {
-                lDataSource.setCurrentCatalog(contextDefaults.getDefaultCatalog().getName());
-            }
-            if (contextDefaults.getDefaultSchema() != null) {
-                lDataSource.setCurrentSchema(contextDefaults.getDefaultSchema().getName());
-            }
-        }
-        return lDataSource;
     }
 
     private void doAutoCompletion(
@@ -182,16 +163,31 @@ public class AILegacyTranslator {
         AtomicReference<String> sql = new AtomicReference<>();
         UIUtils.runInProgressDialog(monitor -> {
             try {
-                final AIDatabaseContext context = new AIDatabaseContext.Builder(dataSource)
+                AIDatabaseContext dbContext = new AIDatabaseContext.Builder(dataSource)
                     .setScope(popup.getScope())
                     .setCustomEntities(popup.getCustomEntities(monitor))
                     .setExecutionContext(executionContext)
                     .build();
 
-                AITranslateRequest daiTranslateRequest = new AITranslateRequest(userInput, context);
                 DBPWorkspace workspace = executionContext.getDataSource().getContainer().getProject().getWorkspace();
                 AIAssistant aiAssistant = AIAssistantRegistry.getInstance().createAssistant(workspace);
-                sql.set(aiAssistant.translateTextToSql(monitor, daiTranslateRequest));
+
+                AIPromptAbstract sysPromptBuilder = AIPromptGenerateSql.create(dbContext::getDataSource);
+                AIMessage userMessage = AIMessage.userMessage(userInput);
+                AIAssistantResponse result = aiAssistant.generateText(
+                    monitor,
+                    dbContext,
+                    sysPromptBuilder,
+                    List.of(userMessage)
+                );
+
+                if (result.isText()) {
+                    String finalText = AITextUtils.extractGeneratedSqlQuery(monitor, dbContext, userMessage, result.getText());
+
+                    sql.set(finalText);
+                } else {
+                    log.debug("Error generating SQL: " + result);
+                }
             } catch (Exception e) {
                 throw new InvocationTargetException(e);
             }

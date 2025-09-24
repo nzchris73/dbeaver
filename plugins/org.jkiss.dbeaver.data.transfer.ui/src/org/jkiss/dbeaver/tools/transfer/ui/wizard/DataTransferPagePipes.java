@@ -260,7 +260,9 @@ class DataTransferPagePipes extends ActiveWizardPage<DataTransferWizard> {
         TransferTarget currentTarget = null;
         if (consumer != null || producer != null) {
             for (TransferTarget target : targets) {
-                if ((target.node == consumer || target.node == producer) && target.processor == processor) {
+                if ((target.node == consumer || target.node == producer) &&
+                    (target.processor == null || target.processor == processor)
+                ) {
                     currentTarget = target;
                     break;
                 }

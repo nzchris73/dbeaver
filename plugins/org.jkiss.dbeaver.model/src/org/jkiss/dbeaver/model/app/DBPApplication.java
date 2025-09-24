@@ -74,6 +74,7 @@ public interface DBPApplication {
      * Application information details.
      * Like license info or some custom produce info
      */
+    @Nullable
     String getInfoDetails(DBRProgressMonitor monitor);
 
     /**
@@ -150,7 +151,6 @@ public interface DBPApplication {
     default boolean isStatisticsCollectionRequired() {
         return false;
     }
-
 
     /**
      * Returns last user activity time

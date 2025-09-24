@@ -37,7 +37,6 @@ import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.struct.DBSObject;
 
 import java.sql.SQLException;
-import java.util.Collection;
 import java.util.List;
 
 public class CubridTable extends GenericTable
@@ -48,6 +47,7 @@ public class CubridTable extends GenericTable
     private CubridCollation collation;
     private Integer autoIncrement;
     private boolean reuseOID = true;
+    private boolean partitioned = false;
 
     public CubridTable(
             @NotNull GenericStructContainer container,
@@ -62,6 +62,7 @@ public class CubridTable extends GenericTable
             this.reuseOID = (JDBCUtils.safeGetString(dbResult, CubridConstants.REUSE_OID)).equals("YES");
             collationName = JDBCUtils.safeGetString(dbResult, CubridConstants.COLLATION);
             autoIncrement = JDBCUtils.safeGetInteger(dbResult, CubridConstants.AUTO_INCREMENT_VAL);
+            partitioned = (JDBCUtils.safeGetString(dbResult, "partitioned")).equals("YES");
             if (type != null) {
                 this.setSystem(type.equals("YES"));
             }
@@ -110,8 +111,7 @@ public class CubridTable extends GenericTable
     }
     
     @NotNull
-    public Collection<CubridPartition> getPartitions(@NotNull DBRProgressMonitor monitor) throws DBException {
-
+    public List<CubridPartition> getPartitions(@NotNull DBRProgressMonitor monitor) throws DBException {
         return partitionCache.getAllObjects(monitor, this);
     }
 
@@ -121,9 +121,13 @@ public class CubridTable extends GenericTable
         return (List<CubridTrigger>) super.getTriggers(monitor);
     }
 
+    public boolean isEnableSchema() {
+        return getDataSource().getSupportMultiSchema() || getDataSource().isDBAGroup();
+    }
+
     @Nullable
     @Override
-    @Property(viewable = true, editable = true, updatable = true, listProvider = OwnerListProvider.class, labelProvider = GenericSchema.SchemaNameTermProvider.class, order = 2)
+    @Property(viewable = true, editableExpr = "object.enableSchema", updatableExpr = "object.enableSchema", listProvider = OwnerListProvider.class, labelProvider = GenericSchema.SchemaNameTermProvider.class, order = 2)
     public GenericSchema getSchema() {
         return owner;
     }
@@ -171,6 +175,11 @@ public class CubridTable extends GenericTable
         this.reuseOID = reuseOID;
     }
 
+    @Property(viewable = true, order = 53)
+    public boolean isPartitioned() {
+        return partitioned;
+    }
+
     @Nullable
     @Property(viewable = true, editable = true, updatable = true, order = 10)
     public Integer getAutoIncrement() {
@@ -184,10 +193,10 @@ public class CubridTable extends GenericTable
     @NotNull
     @Override
     public String getFullyQualifiedName(@NotNull DBPEvaluationContext context) {
-        if (this.isSystem()) {
+        if (this.isSystem() || !getDataSource().getSupportMultiSchema()) {
             return DBUtils.getFullQualifiedName(getDataSource(), this);
         } else {
-            return DBUtils.getFullQualifiedName(getDataSource(), this.getSchema(), this);
+            return DBUtils.getQuotedIdentifier(this.getSchema()) + "." + DBUtils.getFullQualifiedName(getDataSource(), this);
         }
     }
 
@@ -223,6 +232,7 @@ public class CubridTable extends GenericTable
             if(table.getDataSource().getSupportMultiSchema()) {
                 sql.append(" and owner_name = ?");
             }
+            sql = table.getDataSource().wrapShardQuery(sql);
             final JDBCPreparedStatement dbStat = session.prepareStatement(sql.toString());
             dbStat.setString(1, table.getName());
             if(table.getDataSource().getSupportMultiSchema()) {

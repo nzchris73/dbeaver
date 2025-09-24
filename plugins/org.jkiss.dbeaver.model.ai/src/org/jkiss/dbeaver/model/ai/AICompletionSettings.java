@@ -22,101 +22,82 @@ import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBPDataSourceContainer;
 import org.jkiss.dbeaver.model.impl.preferences.BundlePreferenceStore;
 import org.jkiss.dbeaver.model.preferences.DBPPreferenceStore;
-import org.jkiss.utils.ArrayUtils;
 import org.jkiss.utils.CommonUtils;
 
-import java.io.IOException;
+import java.util.Map;
 
 /**
- * Completion settings.
- * These settings are stored for each connection separately.
+ * AI completion settings.
+ * Datasource-specific settings. Used in prompt generators to generate context info message.
  */
-public final class AICompletionSettings {
+public class AICompletionSettings extends AIContextSettings {
+
+    // Meta parameters
+    public static final String AI_DS_EXTENSION = "ai.assistant";
+    public static final String AI_META_TRANSFER_CONFIRMED = "ai.meta.transferConfirmed";
+    public static final String AI_META_SCOPE = "ai.meta.scope";
+    public static final String AI_META_CUSTOM = "ai.meta.customObjects";
 
     private static final Log log = Log.getLog(AICompletionSettings.class);
 
     private final DBPDataSourceContainer dataSourceContainer;
-    private boolean metaTransferConfirmed;
-    private boolean allowMetaTransfer;
-    private AIDatabaseScope scope;
-    private String[] customObjectIds;
+    protected final DBPPreferenceStore preferenceStore;
 
-    public AICompletionSettings(DBPDataSourceContainer dataSourceContainer) {
+    public AICompletionSettings(@NotNull DBPDataSourceContainer dataSourceContainer) {
+        this(getPreferenceStore(), dataSourceContainer);
+    }
+
+    public AICompletionSettings(@NotNull DBPPreferenceStore preferenceStore, @NotNull DBPDataSourceContainer dataSourceContainer) {
         this.dataSourceContainer = dataSourceContainer;
+        this.preferenceStore = preferenceStore;
         loadSettings();
     }
 
+    @Override
     @NotNull
     public DBPDataSourceContainer getDataSourceContainer() {
         return dataSourceContainer;
     }
 
-    public boolean isMetaTransferConfirmed() {
-        return metaTransferConfirmed;
+    protected void loadSettings() {
+        Object dsConfig = dataSourceContainer.getExtension(AI_DS_EXTENSION);
+        if (dsConfig == null) {
+            loadLegacySettings();
+        } else if (dsConfig instanceof Map map){
+            // Load settings from map
+            loadSettingsFromMap(map);
+        } else {
+            log.error("Unknown AI settings format: " + dsConfig);
+        }
     }
 
-    public void setMetaTransferConfirmed(boolean metaTransferConfirmed) {
-        this.metaTransferConfirmed = metaTransferConfirmed;
+    public void saveSettings() {
+        // Save settings as map
+        dataSourceContainer.setExtension(AI_DS_EXTENSION, saveSettingsToMap());
+        dataSourceContainer.persistConfiguration();
     }
 
-    public boolean isAllowMetaTransfer() {
-        return allowMetaTransfer;
-    }
+    // Deprecated methods - kept for backward compatibility
 
-    public void setAllowMetaTransfer(boolean allowMetaTransfer) {
-        this.allowMetaTransfer = allowMetaTransfer;
-    }
-
-    public AIDatabaseScope getScope() {
-        return scope;
-    }
-
-    public void setScope(AIDatabaseScope scope) {
-        this.scope = scope;
-    }
-
-    public String[] getCustomObjectIds() {
-        return customObjectIds;
-    }
-
-    public void setCustomObjectIds(String[] customObjectIds) {
-        this.customObjectIds = customObjectIds;
+    private void loadLegacySettings() {
+        // Legacy configuration from preferences
+        settings.confirmed = preferenceStore.getBoolean(getParameterName(AI_META_TRANSFER_CONFIRMED));
+        settings.scope = CommonUtils.valueOf(
+            AIDatabaseScope.class,
+            preferenceStore.getString(getParameterName(AI_META_SCOPE)),
+            AIDatabaseScope.CURRENT_SCHEMA);
+        String csString = preferenceStore.getString(getParameterName(AI_META_CUSTOM));
+        settings.objects = CommonUtils.isEmpty(csString) ? new String[0] : csString.split(",");
     }
 
     @NotNull
     private static BundlePreferenceStore getPreferenceStore() {
-        return new BundlePreferenceStore("org.jkiss.dbeaver.model.ai");
+        return new BundlePreferenceStore(AIConstants.AI_MODEL_PLUGIN_ID);
     }
 
-    private void loadSettings() {
-        DBPPreferenceStore preferenceStore = getPreferenceStore();
-        String prefix = "ai-" + dataSourceContainer.getId() + ".";
-        metaTransferConfirmed = preferenceStore.getBoolean(prefix + AIConstants.AI_META_TRANSFER_CONFIRMED);
-        scope = CommonUtils.valueOf(
-            AIDatabaseScope.class,
-            preferenceStore.getString(prefix + AIConstants.AI_META_SCOPE),
-            AIDatabaseScope.CURRENT_SCHEMA);
-        String csString = preferenceStore.getString(prefix + AIConstants.AI_META_CUSTOM);
-        customObjectIds = csString == null ? new String[0] : csString.split(",");
-    }
-
-    public void saveSettings() {
-        DBPPreferenceStore preferenceStore = getPreferenceStore();
-        String prefix = "ai-" + dataSourceContainer.getId() + ".";
-        preferenceStore.setValue(prefix + AIConstants.AI_META_TRANSFER_CONFIRMED, metaTransferConfirmed);
-        preferenceStore.setValue(prefix + AIConstants.AI_META_SCOPE, scope.name());
-        if (ArrayUtils.isEmpty(customObjectIds)) {
-            preferenceStore.setToDefault(prefix + AIConstants.AI_META_CUSTOM);
-        } else {
-            preferenceStore.setValue(
-                prefix + AIConstants.AI_META_CUSTOM,
-                String.join(",", customObjectIds));
-        }
-        try {
-            preferenceStore.save();
-        } catch (IOException e) {
-            log.error(e);
-        }
+    @NotNull
+    protected String getParameterName(@NotNull String postfix) {
+        return "ai-" + dataSourceContainer.getId() + "." + postfix;
     }
 
 }

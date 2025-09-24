@@ -18,17 +18,23 @@ package org.jkiss.dbeaver.ui.ai;
 
 import org.eclipse.osgi.util.NLS;
 import org.jkiss.code.NotNull;
-import org.jkiss.dbeaver.model.DBIcon;
-import org.jkiss.dbeaver.model.ai.AICompletionSettings;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.ai.AIContextSettings;
+import org.jkiss.dbeaver.model.ai.AIIcons;
+import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.ai.internal.AIUIMessages;
 
+
 public class AIUIUtils {
+    private static final Log log = Log.getLog(AIUIUtils.class);
+
     private AIUIUtils() {
         // prevents instantiation
     }
 
-    public static boolean confirmMetaTransfer(@NotNull AICompletionSettings settings) {
+    public static boolean confirmMetaTransfer(@NotNull AIContextSettings settings) {
         if (settings.isMetaTransferConfirmed()) {
             return true;
         }
@@ -36,10 +42,14 @@ public class AIUIUtils {
         if (UIUtils.confirmAction(UIUtils.getActiveWorkbenchShell(),
             AIUIMessages.confirm_meta_transfer_usage_title,
             NLS.bind(AIUIMessages.confirm_meta_transfer_usage_message, settings.getDataSourceContainer().getName()),
-            DBIcon.AI
+            AIIcons.AI
         )) {
             settings.setMetaTransferConfirmed(true);
-            settings.saveSettings();
+            try {
+                settings.saveSettings();
+            } catch (DBException e) {
+                DBWorkbench.getPlatformUI().showError(AIUIMessages.confirm_meta_transfer_usage_title, null, e);
+            }
             return true;
         }
 
