@@ -80,7 +80,7 @@ public class AIAssistantImpl implements AIAssistant {
         checkAiEnablement();
 
         AIEngineDescriptor engineDescriptor = getEngineDescriptor();
-        try (AIEngine engine = engineDescriptor.createEngineInstance()) {
+        try (AIEngine<?> engine = engineDescriptor.createEngineInstance()) {
             AIEngineRequest completionRequest = buildAiEngineRequest(
                 monitor,
                 context,
@@ -131,8 +131,8 @@ public class AIAssistantImpl implements AIAssistant {
         @Nullable AIDatabaseContext context,
         @NotNull AIPromptGenerator systemGenerator,
         @NotNull List<AIMessage> messages,
-        AIEngine engine,
-        AIEngineDescriptor engineDescriptor
+        @NotNull AIEngine<?> engine,
+        @NotNull AIEngineDescriptor engineDescriptor
     ) throws DBException {
         return requestFactory.build(
             monitor,
@@ -171,6 +171,7 @@ public class AIAssistantImpl implements AIAssistant {
             throw new DBCMessageException("Function '" + functionName + "' not found");
         }
         functionCall.setFunction(function);
+        log.debug("Call AI function '" + function.getId() + "'");
         return registry.callFunction(context, function, functionCall.getArguments());
     }
 
@@ -191,7 +192,7 @@ public class AIAssistantImpl implements AIAssistant {
     }
 
     @NotNull
-    public AIEngine createEngine() throws DBException {
+    public AIEngine<?> createEngine() throws DBException {
         return AIEngineRegistry.getInstance().createEngine(getActiveEngineId());
     }
 
@@ -212,7 +213,7 @@ public class AIAssistantImpl implements AIAssistant {
 
     @NotNull
     protected AIEngineResponse requestCompletion(
-        @NotNull AIEngine engine,
+        @NotNull AIEngine<?> engine,
         @NotNull DBRProgressMonitor monitor,
         @NotNull AIEngineRequest request
     ) throws DBException {
@@ -259,8 +260,14 @@ public class AIAssistantImpl implements AIAssistant {
         return settingsManager.getSettings().getEngineConfiguration(activeEngine);
     }
 
-
     protected static <T> T callWithRetry(ThrowableSupplier<T, DBException> supplier) throws DBException {
+        return callWithRetry(null, supplier);
+    }
+
+    protected static <T> T callWithRetry(
+        @Nullable AIEngineResponseConsumer listener,
+        @NotNull ThrowableSupplier<T, DBException> supplier
+    ) throws DBException {
         int retry = 0;
         while (retry < MANY_REQUESTS_RETRIES) {
             try {
@@ -272,6 +279,10 @@ public class AIAssistantImpl implements AIAssistant {
                     RuntimeUtils.pause(MANY_REQUESTS_TIMEOUT);
                 }
             }
+        }
+        DBException dbException = new DBException("Request failed after " + MANY_REQUESTS_RETRIES + " attempts");
+        if (listener != null) {
+            listener.error(dbException);
         }
         throw new DBException("Request failed after " + MANY_REQUESTS_RETRIES + " attempts");
     }

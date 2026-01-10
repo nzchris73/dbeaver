@@ -29,6 +29,7 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Text;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.model.ai.engine.AIEngineProperties;
 import org.jkiss.dbeaver.model.ai.engine.AIModel;
 import org.jkiss.dbeaver.model.ai.engine.copilot.CopilotClient;
 import org.jkiss.dbeaver.model.ai.engine.copilot.CopilotCompletionEngine;
@@ -38,18 +39,19 @@ import org.jkiss.dbeaver.model.ai.registry.AIEngineDescriptor;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.runtime.ui.UIServiceAuth;
-import org.jkiss.dbeaver.ui.IObjectPropertyConfigurator;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.ai.internal.AIUIMessages;
 import org.jkiss.dbeaver.ui.ai.model.ContextWindowSizeField;
 import org.jkiss.dbeaver.ui.ai.model.ModelSelectorField;
+import org.jkiss.dbeaver.ui.ai.preferences.AIIObjectPropertyConfigurator;
 import org.jkiss.utils.CommonUtils;
 
 import java.net.URI;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-public class CopilotConfigurator implements IObjectPropertyConfigurator<AIEngineDescriptor, CopilotProperties> {
+public class CopilotConfigurator implements AIIObjectPropertyConfigurator<AIEngineDescriptor, CopilotProperties> {
 
     private Text temperatureText;
     private ContextWindowSizeField contextWindowSizeField;
@@ -129,7 +131,7 @@ public class CopilotConfigurator implements IObjectPropertyConfigurator<AIEngine
         modelSelectorField = ModelSelectorField.builder()
             .withParent(parent)
             .withGridData(new GridData(GridData.FILL_HORIZONTAL))
-            .withSelectionListener(SelectionListener.widgetSelectedAdapter((e) -> {
+            .withModifyListener(() -> {
                 CopilotModels.getModelByName(modelSelectorField.getSelectedModel())
                     .ifPresentOrElse(
                         model -> {
@@ -140,7 +142,7 @@ public class CopilotConfigurator implements IObjectPropertyConfigurator<AIEngine
                             temperatureText.setText("0.0");
                         }
                     );
-            }))
+            })
             .withModelListSupplier(modelListProvider)
             .build();
 
@@ -152,7 +154,6 @@ public class CopilotConfigurator implements IObjectPropertyConfigurator<AIEngine
         GridData gridData = new GridData(GridData.FILL_HORIZONTAL);
         gridData.horizontalSpan = 2;
         temperatureText = UIUtils.createLabelText(parent, AIUIMessages.gpt_preference_page_text_temperature, "0.0");
-        temperatureText.addVerifyListener(UIUtils.getNumberVerifyListener(Locale.getDefault()));
         temperatureText.setLayoutData(gridData);
         temperatureText.setToolTipText("Lower temperatures give more precise results");
         temperatureText.addVerifyListener(UIUtils.getNumberVerifyListener(Locale.getDefault()));
@@ -243,5 +244,12 @@ public class CopilotConfigurator implements IObjectPropertyConfigurator<AIEngine
         } catch (InterruptedException e) {
             throw new DBException("Authorization was interrupted", e);
         }
+    }
+
+    @Override
+    public Optional<AIEngineProperties> getCurrentProperties() {
+        CopilotProperties copilotPropertiesCopy = new CopilotProperties();
+        saveSettings(copilotPropertiesCopy);
+        return Optional.of(copilotPropertiesCopy);
     }
 }
