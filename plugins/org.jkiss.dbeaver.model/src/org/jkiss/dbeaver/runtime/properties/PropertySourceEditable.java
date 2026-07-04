@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.utils.CommonUtils;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -64,15 +65,14 @@ public class PropertySourceEditable extends PropertySourceAbstract implements DB
         if (commandContext == null) {
             return true;
         }
-        DBEObjectEditor objectEditor = getObjectEditor(DBEObjectEditor.class);
+        DBEObjectEditor objectEditor = getObjectEditor(object, DBEObjectEditor.class);
         return objectEditor != null &&
             object instanceof DBPObject po && objectEditor.canEditObject(po)
             && DBWorkbench.getPlatform().getWorkspace().hasRealmPermission(RMConstants.PERMISSION_METADATA_EDITOR);
     }
 
     @Nullable
-    private <T> T getObjectEditor(@NotNull Class<T> managerType) {
-        final Object editableValue = getEditableValue();
+    private <T> T getObjectEditor(@Nullable Object editableValue, @NotNull Class<T> managerType) {
         if (editableValue == null) {
             return null;
         }
@@ -109,9 +109,9 @@ public class PropertySourceEditable extends PropertySourceAbstract implements DB
                 // Do nothing
             } else if (lastCommand == null || lastCommand.getObject() != editableValue || lastCommand.property != prop || !commandContext.isDirty()) {
                 // Last command is not applicable (check for isDirty because command queue might be reverted)
-                final DBEObjectEditor<DBPObject> objectEditor = getObjectEditor(DBEObjectEditor.class);
+                final DBEObjectEditor<DBPObject> objectEditor = getObjectEditor(editableValue, DBEObjectEditor.class);
                 if (objectEditor == null) {
-                    log.error("Can't obtain object editor for " + getEditableValue());
+                    log.error("Can't obtain object editor for " + editableValue);
                     return;
                 }
                 final DBEPropertyHandler<DBPObject> propertyHandler = objectEditor.makePropertyHandler(
@@ -129,7 +129,7 @@ public class PropertySourceEditable extends PropertySourceAbstract implements DB
         // If we perform rename then we should refresh object cache
         // To update name-based cache
         if (prop.isNameProperty() && editableValue instanceof DBSObject dbsObject) {
-            DBEObjectMaker objectManager = getObjectEditor(DBEObjectMaker.class);
+            DBEObjectMaker objectManager = getObjectEditor(editableValue, DBEObjectMaker.class);
             if (objectManager != null) {
                 DBSObjectCache cache = objectManager.getObjectsCache(dbsObject);
                 if (cache != null && cache.isFullyCached()) {
@@ -165,6 +165,16 @@ public class PropertySourceEditable extends PropertySourceAbstract implements DB
     ) throws IllegalArgumentException {
         // Write property value
         try {
+            if (Collection.class.isAssignableFrom(prop.getDataType()) && value instanceof String str) {
+                // For collection params convert to array and use first item only.
+                // FIXME: support all array items search by enum/name (see below)
+                List<String> strings = DBUtils.convertArrayStringToList(str);
+                if (strings.isEmpty()) {
+                    value = null;
+                } else {
+                    value = strings.getFirst();
+                }
+            }
             // Check for complex object
             // If value should be a named object then try to obtain it from list provider
             if (value != null && value.getClass() == String.class) {

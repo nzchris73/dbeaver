@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,8 +47,16 @@ public final class ResultSetPreferences {
     public static final String RESULT_SET_SHOW_CELL_ICONS = "resultset.show.cellIcons"; //$NON-NLS-1$
     public static final String RESULT_SET_SHOW_ATTR_ICONS = "resultset.show.attIcons"; //$NON-NLS-1$
     public static final String RESULT_SET_SHOW_ATTR_FILTERS = "resultset.show.attFilters"; //$NON-NLS-1$
+    public static final String RESULT_SET_SHOW_FILTER_PANEL = "resultset.show.filterPanel"; //$NON-NLS-1$
     public static final String RESULT_SET_SHOW_ATTR_ORDERING = "resultset.show.attrOrder"; //$NON-NLS-1$
     public static final String RESULT_SET_SHOW_DESCRIPTION = "resultset.show.columnDescription"; //$NON-NLS-1$
+    public static final String RESULT_SET_COLUMN_HEADER_EXTRA = "resultset.show.columnHeaderExtra"; //$NON-NLS-1$
+
+    public enum ColumnHeaderExtraContent {
+        NOTHING,
+        DESCRIPTION,
+        DATA_TYPE
+    }
 
     public static final String RESULT_SET_SHOW_SEL_ROWS = "resultset.show.selected.rows"; //$NON-NLS-1$
     public static final String RESULT_SET_SHOW_SEL_COLUMNS = "resultset.show.selected.columns"; //$NON-NLS-1$

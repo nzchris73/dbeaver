@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
  */
 package org.jkiss.dbeaver.model.navigator;
 
+import org.eclipse.core.filesystem.EFS;
+import org.eclipse.core.filesystem.IFileStore;
 import org.eclipse.core.resources.*;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
@@ -25,6 +27,8 @@ import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.*;
 import org.jkiss.dbeaver.model.app.*;
+import org.jkiss.dbeaver.model.fs.efs.NIOEFSFileSystemProvider;
+import org.jkiss.dbeaver.model.fs.efs.NIOEFSPath;
 import org.jkiss.dbeaver.model.fs.nio.EFSNIOResource;
 import org.jkiss.dbeaver.model.meta.Property;
 import org.jkiss.dbeaver.model.rm.RMConstants;
@@ -36,6 +40,7 @@ import org.jkiss.utils.CommonUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
@@ -55,6 +60,7 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat(DBConstants.DEFAULT_TIMESTAMP_FORMAT);
 
     private static final NumberFormat numberFormat = new DecimalFormat();
+    public static final NIOEFSFileSystemProvider NIOEFS_FILE_SYSTEM_PROVIDER = new NIOEFSFileSystemProvider();
 
     private IResource resource;
     private DBPResourceHandler handler;
@@ -246,14 +252,6 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
     }
 
     @NotNull
-    @Deprecated
-    @Override
-    public String getNodeItemPath() {
-        String projectPath = getRawNodeItemPath();
-        return NodePathType.resource.getPrefix() + projectPath;
-    }
-
-    @NotNull
     public String getRawNodeItemPath() {
         StringBuilder pathName = new StringBuilder();
 
@@ -327,13 +325,7 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
                 if (otherResource != null) {
                     try {
                         if (otherResource instanceof EFSNIOResource) {
-                            if (DBWorkbench.isDistributed() && resource.getRawLocation() == null) {
-                                throw new DBException("Paste is not supported for " + resource);
-                            }
-                            otherResource.copy(
-                                resource.getRawLocation().append(otherResource.getName()),
-                                true,
-                                monitor.getNestedMonitor());
+                            fileStoreRecursiveCopy(monitor, otherResource);
                         } else {
                             if (DBWorkbench.isDistributed() && !CommonUtils.equalObjects(otherResource.getProject(), resource.getProject())) {
                                 throw new DBException("Cross-project resource move is not supported in distributed workspaces");
@@ -344,7 +336,7 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
                                 monitor.getNestedMonitor());
                         }
                         NavigatorResources.refreshFileStore(monitor, resource);
-                        resource.refreshLocal(IResource.DEPTH_ONE, monitor.getNestedMonitor());
+                        resource.refreshLocal(IResource.DEPTH_INFINITE, monitor.getNestedMonitor());
                     } catch (CoreException e) {
                         throw new DBException("Can't copy " + otherResource.getName() + " to " + resource.getName(), e);
                     }
@@ -356,6 +348,55 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
         } finally {
             monitor.done();
         }
+    }
+
+    private void fileStoreRecursiveCopy(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull IResource otherResource
+    ) throws DBException, CoreException {
+        fileStoreRecursiveCopy(monitor, otherResource, null);
+    }
+
+    private void fileStoreRecursiveCopy(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull IResource otherResource,
+        @Nullable IFileStore destinationStore
+    ) throws DBException, CoreException {
+        IFileStore dstStore = destinationStore != null ? destinationStore : getDestinationStore();
+        dstStore = dstStore.getChild(otherResource.getName());
+        if (otherResource instanceof IFolder folderSource) {
+            dstStore.mkdir(EFS.NONE, monitor.getNestedMonitor());
+            for (IResource memeber : folderSource.members()) {
+                fileStoreRecursiveCopy(monitor, memeber, dstStore);
+            }
+        } else {
+            fileStoreSingleFileCopy(monitor, otherResource, dstStore);
+        }
+    }
+
+    @NotNull
+    private IFileStore getDestinationStore() throws DBException, CoreException {
+        URI dstUri = resource.getLocationURI();
+        if (dstUri == null) {
+            throw new DBException("Destination resource has no location URI");
+        }
+        return EFS.getStore(dstUri);
+    }
+
+    private void fileStoreSingleFileCopy(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull IResource otherResource,
+        @NotNull IFileStore dstStore
+    ) throws DBException, CoreException {
+        URI srcUri = otherResource.getLocationURI();
+        if (srcUri == null) {
+            throw new DBException("Source resource has no location URI");
+        }
+        EFS.getStore(srcUri).copy(
+            dstStore,
+            EFS.OVERWRITE | EFS.SHALLOW,
+            monitor.getNestedMonitor()
+        );
     }
 
     public boolean supportsPaste(@NotNull DBNNode other) {
@@ -430,7 +471,11 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
             }
             if (adapter == Path.class) {
                 IPath location = resource.getLocation();
-                return location == null ? null : adapter.cast(location.toPath());
+                return location != null
+                    ? adapter.cast(location.toPath())
+                    : resource.getLocationURI() != null
+                        ? adapter.cast(createPath(resource.getLocationURI()))
+                        : null;
             } else if (adapter == InputStream.class && resource instanceof IFile file) {
                 try {
                     return adapter.cast(file.getContents());
@@ -440,6 +485,11 @@ public class DBNResource extends DBNNode implements DBNStreamData, DBNNodeWithCa
             }
         }
         return super.getAdapter(adapter);
+    }
+
+    @NotNull
+    private NIOEFSPath createPath(@NotNull URI locationUri) {
+        return NIOEFS_FILE_SYSTEM_PROVIDER.getPath(locationUri);
     }
 
     @NotNull

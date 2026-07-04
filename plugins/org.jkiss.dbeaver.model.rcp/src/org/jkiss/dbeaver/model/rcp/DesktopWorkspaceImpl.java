@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ import org.jkiss.dbeaver.model.DBPAdaptable;
 import org.jkiss.dbeaver.model.DBPExternalFileManager;
 import org.jkiss.dbeaver.model.DBPImage;
 import org.jkiss.dbeaver.model.app.*;
+import org.jkiss.dbeaver.model.fs.DBFResourceAdapter;
+import org.jkiss.dbeaver.model.fs.DBFVirtualFileSystemRoot;
 import org.jkiss.dbeaver.model.impl.app.BaseWorkspaceImpl;
 import org.jkiss.dbeaver.model.runtime.AbstractJob;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
@@ -35,17 +37,19 @@ import org.jkiss.dbeaver.registry.ResourceTypeDescriptor;
 import org.jkiss.dbeaver.registry.ResourceTypeRegistry;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.utils.GeneralUtils;
+import org.jkiss.dbeaver.utils.ResourceUtils;
 import org.jkiss.utils.ArrayUtils;
 import org.jkiss.utils.CommonUtils;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
  * DBeaver desktop workspace.
  */
-public class DesktopWorkspaceImpl extends EclipseWorkspaceImpl implements DBPWorkspaceDesktop, DBPExternalFileManager {
+public class DesktopWorkspaceImpl extends EclipseWorkspaceImpl implements DBPWorkspaceDesktop, DBPExternalFileManager, DBFResourceAdapter {
 
     private static final Log log = Log.getLog(DesktopWorkspaceImpl.class);
 
@@ -65,6 +69,22 @@ public class DesktopWorkspaceImpl extends EclipseWorkspaceImpl implements DBPWor
         loadExternalFileProperties();
     }
 
+    @Nullable
+    @Override
+    public <T> T adaptResource(DBFVirtualFileSystemRoot fsRoot, Path path, Class<T> adapter) {
+        if (adapter == IResource.class) {
+            // For Eclipse VFS we always need a project
+            // Although path is a remote file we have to represent it as IFile
+            // thus we need any IProject we have
+            // This is a bit inconsistent but we can just blame Eclipse VFS
+            if (!(activeProject instanceof DesktopProjectImpl dp)) {
+                return null;
+            }
+            return adapter.cast(ResourceUtils.createResourceFromPath(fsRoot, dp.getEclipseProject(), path));
+        }
+        return null;
+    }
+
     private void loadExtensions(@NotNull IExtensionRegistry registry) {
         {
             IConfigurationElement[] extElements = registry.getConfigurationElementsFor(ResourceHandlerDescriptor.EXTENSION_ID);
@@ -81,13 +101,13 @@ public class DesktopWorkspaceImpl extends EclipseWorkspaceImpl implements DBPWor
 
     @Override
     public void dispose() {
-        super.dispose();
-
         // Dispose resource handlers
         for (ResourceHandlerDescriptor handlerDescriptor : this.handlerDescriptors) {
             handlerDescriptor.dispose();
         }
         this.handlerDescriptors.clear();
+
+        super.dispose();
     }
 
     private DBPResourceHandler getResourceHandler(DBPResourceTypeDescriptor resourceType) {
@@ -287,6 +307,21 @@ public class DesktopWorkspaceImpl extends EclipseWorkspaceImpl implements DBPWor
 
         } catch (Throwable e) {
             log.error("Error refreshing workspace contents", e);
+        }
+    }
+
+    @Override
+    public void renameProject(@NotNull DBPProject project, @NotNull String newName) throws DBException {
+        if (project instanceof DesktopProjectImpl projectImpl) {
+            IProject eclipseProject = projectImpl.getEclipseProject();
+            try {
+                project.updateProject(newName, null);
+                IProjectDescription description = eclipseProject.getDescription();
+                description.setName(newName);
+                eclipseProject.move(description, true, null);
+            } catch (CoreException e) {
+                throw new DBException("Error renaming project", e);
+            }
         }
     }
 

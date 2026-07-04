@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -346,6 +346,9 @@ class ConnectionPageSettings extends ActiveWizardPage<ConnectionWizard> implemen
                         activateCurrentItem();
                     }
                 });
+                // Set focus to the first tab
+                // Otherwise focus foes into top right control which breaks traverse keys
+                tabFolder.getSelection().getControl().setFocus();
             }
 
             activateCurrentItem();
@@ -404,7 +407,7 @@ class ConnectionPageSettings extends ActiveWizardPage<ConnectionWizard> implemen
 
             manager.add(new Separator());
 
-            for (DBWNetworkProfile profile : getProject().getDataSourceRegistry().getNetworkProfiles()) {
+            for (DBWNetworkProfile profile : getProject().getDataSourceRegistry().getNetworkProfiles().getAllProfiles()) {
                 manager.add(new ChooseNetworkProfileAction(dataSource, profile, null, index++));
             }
 
@@ -691,6 +694,7 @@ class ConnectionPageSettings extends ActiveWizardPage<ConnectionWizard> implemen
                 ConfirmationDialog.INFORMATION,
                 DBeaverPreferences.CONFIRM_DISABLE_NETWORK_HANDLER,
                 ConfirmationDialog.CONFIRM,
+                descriptor.getCodeName(),
                 descriptor.getCodeName()
             );
 
@@ -1059,7 +1063,7 @@ class ConnectionPageSettings extends ActiveWizardPage<ConnectionWizard> implemen
         if (CommonUtils.isEmpty(configuration.getConfigProfileName())) {
             return null;
         }
-        return dataSource.getRegistry().getNetworkProfile(
+        return dataSource.getRegistry().getNetworkProfiles().getProfile(
             configuration.getConfigProfileSource(),
             configuration.getConfigProfileName()
         );

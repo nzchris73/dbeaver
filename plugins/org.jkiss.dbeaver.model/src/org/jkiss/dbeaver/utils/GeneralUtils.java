@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,7 +57,6 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * General non-ui utility methods
@@ -76,7 +75,8 @@ public class GeneralUtils {
     public static final String DEFAULT_TIMESTAMP_PATTERN = "yyyyMMddHHmm";
     public static final String DEFAULT_DATE_PATTERN = "yyyyMMdd";
     public static final String DEFAULT_TIME_PATTERN = "HHmmss";
-    public static final String RESOURCE_NAME_FORBIDDEN_SYMBOLS_REGEX = "(?U)[^/:'\"\\\\<>|?*]+";
+    public static final char[] RESOURCE_NAME_FORBIDDEN_SYMBOLS = { '/', '\\', ':', '"', '\'', '<', '>', '|', '?', '*' };
+    //public static final String RESOURCE_NAME_FORBIDDEN_SYMBOLS = "/\\:\"'<>|?*";
 
     public static final String[] byteToHex = new String[256];
     public static final char[] nibbleToHex = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
@@ -448,6 +448,21 @@ public class GeneralUtils {
 
     public static boolean isWhitespaceExt(char c) {
         return c <= ' ' || c == 0x160;
+    }
+
+    @NotNull
+    public static String findJavaExecutable() throws IOException {
+        String javaHome = System.getProperty("java.home");
+        if (javaHome == null) {
+            throw new IOException("java.home is not set");
+        }
+
+        Path java = Path.of(javaHome, "bin", RuntimeUtils.isWindows() ? "java.exe" : "java");
+        if (!Files.isExecutable(java)) {
+            throw new IOException("Java executable not found at " + java);
+        }
+
+        return java.toAbsolutePath().toString();
     }
 
     public interface IParameterHandler {
@@ -945,6 +960,8 @@ public class GeneralUtils {
 
     /**
      * Validates the resource name unconditionally.
+     * Throws an error if resource name starts or ends with a dot or
+     * contains any of RESOURCE_NAME_FORBIDDEN_SYMBOLS characters.
      *
      * @param name resource name to validate
      * @throws DBException if resource name is invalid
@@ -956,13 +973,13 @@ public class GeneralUtils {
         if (name.endsWith(".")) {
             throw new DBException("Resource name '" + name + "' can't end with dot");
         }
-
-        String forbiddenSymbols = name.replaceAll(RESOURCE_NAME_FORBIDDEN_SYMBOLS_REGEX, "");
-        if (CommonUtils.isNotEmpty(forbiddenSymbols)) {
-            String forbiddenExplain = forbiddenSymbols.chars()
-                .mapToObj(c -> Character.toString((char) c))
-                .collect(Collectors.joining(" "));
-            throw new DBException("Resource name '" + name + "' contains illegal characters:  " + forbiddenExplain);
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            for (char fc : RESOURCE_NAME_FORBIDDEN_SYMBOLS) {
+                if (c == fc) {
+                    throw new DBException("Resource name '" + name + "' contains illegal character [" + c + "]");
+                }
+            }
         }
     }
 
@@ -1002,8 +1019,7 @@ public class GeneralUtils {
         }
     }
 
-
-    @Nullable
+    @NotNull
     public static String makeStandardErrorMessage(@NotNull Throwable error) {
         if (error instanceof UnknownHostException) {
             return "Unknown host " + CommonUtils.notEmpty(error.getMessage());
@@ -1015,8 +1031,16 @@ public class GeneralUtils {
             return "Class not found: " + cnfe.getMessage();
         } else if (error instanceof NoClassDefFoundError ncdf) {
             return "Class definition not found: " + ncdf.getMessage();
+        } else if (error instanceof IllegalArgumentException iae) {
+            if (!CommonUtils.isEmptyTrimmed(iae.getMessage())) {
+                return "Invalid argument: " + iae.getMessage();
+            }
         }
-        return error.getLocalizedMessage();
+        String localizedMessage = error.getLocalizedMessage();
+        if (CommonUtils.isEmpty(localizedMessage)) {
+            return error.getClass().getSimpleName();
+        }
+        return localizedMessage;
     }
 
 }

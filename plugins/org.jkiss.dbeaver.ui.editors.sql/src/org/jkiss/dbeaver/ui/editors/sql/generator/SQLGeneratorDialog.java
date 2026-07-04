@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,13 +30,14 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.RowLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
-import org.eclipse.swt.widgets.Group;
 import org.eclipse.ui.IWorkbenchPartSite;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.DBPDataSource;
 import org.jkiss.dbeaver.model.DBPScriptObject;
 import org.jkiss.dbeaver.model.DBPScriptObjectExt2;
+import org.jkiss.dbeaver.model.DBUtils;
 import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
 import org.jkiss.dbeaver.model.exec.DBExecUtils;
 import org.jkiss.dbeaver.model.navigator.DBNDatabaseNode;
@@ -71,10 +72,16 @@ class SQLGeneratorDialog extends ViewSQLDialog {
 
     @Override
     protected void createButtonsForButtonBar(Composite parent) {
+        createSaveToFileButton(parent);
         createRefreshButton(parent);
         super.createButtonsForButtonBar(parent);
+        Button copyButton = getButton(IDialogConstants.DETAILS_ID);
+        if (copyButton != null) {
+            copyButton.setEnabled(false);
+        }
     }
     
+    @NotNull
     @Override
     protected Composite createDialogArea(Composite parent) {
         sqlGenerator.setFullyQualifiedNames(getDialogBoundsSettings().get(PROP_USE_FQ_NAMES) == null ||
@@ -91,9 +98,12 @@ class SQLGeneratorDialog extends ViewSQLDialog {
         boolean supportFullDDL = false;
         boolean supportSeparateFKStatements = false;
         boolean supportsPartitionsDDL = false;
+
+        Boolean supportsFormatting = null;
+        DBPDataSource dataSource = null;
+
         for (Object object : sqlGenerator.getObjects()) {
-            if (object instanceof DBPScriptObjectExt2) {
-                DBPScriptObjectExt2 sourceObject = (DBPScriptObjectExt2) object;
+            if (object instanceof DBPScriptObjectExt2 sourceObject) {
                 if (sourceObject.supportsObjectDefinitionOption(DBPScriptObject.OPTION_INCLUDE_PERMISSIONS)) {
                     supportPermissions = true;
                 }
@@ -114,6 +124,21 @@ class SQLGeneratorDialog extends ViewSQLDialog {
                     supportsPartitionsDDL = true;
                 }
             }
+            if (!Boolean.FALSE.equals(supportsFormatting)) {
+                DBPDataSource objectDataSource = DBUtils.getObjectDataSource(object);
+                if (objectDataSource != null) {
+                    if (supportsFormatting == null) {
+                        supportsFormatting = true;
+                        dataSource = objectDataSource;
+                    } else if (supportsFormatting && !dataSource.equals(objectDataSource)) {
+                        supportsFormatting = false;
+                    }
+                }
+            }
+        }
+
+        if (supportsFormatting == null) {
+            supportsFormatting = false;
         }
 
         sqlGenerator.setShowPermissions(getDialogBoundsSettings().get(DBPScriptObject.OPTION_INCLUDE_PERMISSIONS) != null &&
@@ -122,6 +147,8 @@ class SQLGeneratorDialog extends ViewSQLDialog {
                 getDialogBoundsSettings().getBoolean(DBPScriptObject.OPTION_INCLUDE_COMMENTS));
         sqlGenerator.setShowFullDdl(getDialogBoundsSettings().get(DBPScriptObject.OPTION_INCLUDE_NESTED_OBJECTS) != null &&
                 getDialogBoundsSettings().getBoolean(DBPScriptObject.OPTION_INCLUDE_NESTED_OBJECTS));
+        sqlGenerator.setFormatSql(supportsFormatting && getDialogBoundsSettings().get(DBPScriptObject.OPTION_FORMAT_SQL) != null &&
+            getDialogBoundsSettings().getBoolean(DBPScriptObject.OPTION_FORMAT_SQL));
 
         generateDDLJob = new AbstractJob("Generating DDL") {
             @NotNull
@@ -168,7 +195,7 @@ class SQLGeneratorDialog extends ViewSQLDialog {
             return composite;
         }
         
-        Group settings = UIUtils.createControlGroup(composite, "Settings", 5, GridData.FILL_HORIZONTAL, SWT.DEFAULT);
+        Composite settings = UIUtils.createTitledComposite(composite, "Settings", 5, GridData.FILL_HORIZONTAL, SWT.DEFAULT);
         settings.setLayout(new RowLayout());
         Button useFQNames = UIUtils.createCheckbox(settings, SQLEditorMessages.sql_generator_dialog_button_use_fully_names, sqlGenerator.isFullyQualifiedNames());
         useFQNames.addSelectionListener(new SelectionAdapter() {
@@ -285,6 +312,22 @@ class SQLGeneratorDialog extends ViewSQLDialog {
                 }
             });
         }
+        if (supportsFormatting) {
+            Button chkFormatSql = UIUtils.createCheckbox(
+                settings,
+                SQLEditorMessages.sql_generator_dialog_button_format_sql,
+                sqlGenerator.isFormatSql()
+            );
+            chkFormatSql.setToolTipText(SQLEditorMessages.sql_generator_dialog_button_format_sql_tip);
+            chkFormatSql.addSelectionListener(new SelectionAdapter() {
+                @Override
+                public void widgetSelected(SelectionEvent e) {
+                    sqlGenerator.setFormatSql(chkFormatSql.getSelection());
+                    getDialogBoundsSettings().put(DBPScriptObject.OPTION_FORMAT_SQL, chkFormatSql.getSelection());
+                    startGenerateJob();
+                }
+            });
+        }
         return composite;
     }
 
@@ -296,8 +339,7 @@ class SQLGeneratorDialog extends ViewSQLDialog {
                 @Override
                 protected IStatus run(@NotNull DBRProgressMonitor monitor) {
                     for (Object object : sqlGenerator.getObjects()) {
-                        if (object instanceof DBSObject) {
-                            DBSObject dbsObject = (DBSObject) object;
+                        if (object instanceof DBSObject dbsObject) {
                             try {
                                 DBNDatabaseNode dbnNode = DBNUtils.getNodeByObject(dbsObject);
                                 dbnNode.refreshNode(monitor, object);

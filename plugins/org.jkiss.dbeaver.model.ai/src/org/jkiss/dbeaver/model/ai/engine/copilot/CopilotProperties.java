@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.jkiss.dbeaver.model.ai.engine.copilot;
 
 import com.google.gson.annotations.SerializedName;
+import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.ai.engine.AIEngineProperties;
@@ -59,6 +60,11 @@ public class CopilotProperties implements AIEngineProperties {
         return token;
     }
 
+    @NotNull
+    public String getBaseAuthUrl() {
+        return CopilotConstants.BASE_AUTH_URL;
+    }
+
     public void setToken(@Nullable String token) {
         this.token = token;
     }
@@ -76,16 +82,16 @@ public class CopilotProperties implements AIEngineProperties {
     @Override
     @Property(order = 3)
     public double getTemperature() {
-        if (temperature != 0.0) {
+        if (Double.isFinite(temperature) && temperature != AIUtils.DEFAULT_TEMPERATURE) {
             return temperature;
         }
         return CopilotModels.getModelByName(model)
             .map(AIModel::defaultTemperature)
-            .orElse(0.0);
+            .orElse(AIUtils.DEFAULT_TEMPERATURE);
     }
 
     public void setTemperature(double temperature) {
-        this.temperature = temperature;
+        this.temperature = AIUtils.normalizeTemperature(temperature);
     }
 
     @Override

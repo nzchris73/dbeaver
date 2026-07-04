@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,6 +106,7 @@ public class OracleConstants {
     public static final String PROP_METADATA_USE_SYS_SCHEMA = DBConstants.INTERNAL_PROP_PREFIX + "meta-use-sys-schema@";
     public static final String PROP_METADATA_USE_SIMPLE_CONSTRAINTS = DBConstants.INTERNAL_PROP_PREFIX + "meta-use-simple-constraints@";
     public static final String PROP_METADATA_USE_ALTERNATIVE_TABLE_QUERY = DBConstants.INTERNAL_PROP_PREFIX + "meta-use-alternative-table-query@";
+    public static final String PROP_METADATA_READ_COLUMN_COMMENTS = DBConstants.INTERNAL_PROP_PREFIX + "meta-read-column-comments@";
     public static final String PROP_SEARCH_METADATA_IN_SYNONYMS = "oracle.meta-search-in-synonyms"; //$NON-NLS-1$
     public static final String PROP_SEARCH_METADATA_IN_SEQUENCES = "oracle.meta-search-in-sequences"; //$NON-NLS-1$
     public static final String PROP_SHOW_DATE_AS_DATE = "oracle.show-date-as-date"; //$NON-NLS-1$
@@ -134,6 +135,7 @@ public class OracleConstants {
     public static final String TYPE_NAME_ROWID = "ROWID";
     public static final String TYPE_NAME_VARCHAR2 = "VARCHAR2";
     public static final String TYPE_CLOB = "CLOB";
+    public static final String TYPE_NCLOB = "NCLOB";
     public static final String TYPE_NAME_TIMESTAMP = "TIMESTAMP";
     public static final String TYPE_NUMBER = "NUMBER";
     public static final String TYPE_DECIMAL = "DECIMAL";

@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,8 +30,6 @@ import org.jkiss.dbeaver.runtime.ui.DBPPlatformUI;
 import org.jkiss.dbeaver.utils.GeneralUtils;
 import org.jkiss.dbeaver.utils.RuntimeUtils;
 
-import java.nio.file.Path;
-
 /**
  * Headless application
  */
@@ -54,20 +52,15 @@ public class DBeaverHeadlessApplication extends DesktopApplicationImpl {
         ) {
             System.setProperty(GeneralUtils.PROP_TRUST_STORE_TYPE, GeneralUtils.VALUE_TRUST_STORE_TYPE_WINDOWS);
         }
-        System.out.println("Starting headless test application " + application.getClass().getName());
+        log.debug("Starting headless test application " + application.getClass().getName());
 
         return EXIT_OK;
     }
 
     @Override
     public void stop() {
-        System.out.println("Starting headless test application");
+        log.debug("Starting headless test application");
         super.stop();
-    }
-
-    @Override
-    public @Nullable Path getDefaultWorkingFolder() {
-        return null;
     }
 
     @NotNull
@@ -85,6 +78,11 @@ public class DBeaverHeadlessApplication extends DesktopApplicationImpl {
     @Override
     public String getDefaultProjectName() {
         return "DBeaverTests";
+    }
+
+    @Override
+    public boolean isHeadlessMode() {
+        return true;
     }
 
     @NotNull
