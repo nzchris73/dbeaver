@@ -16,18 +16,23 @@
  */
 package org.jkiss.dbeaver.model.ai;
 
+import com.google.gson.annotations.JsonAdapter;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBPAdaptable;
 import org.jkiss.dbeaver.model.ai.engine.AIEngineProperties;
+import org.jkiss.dbeaver.model.ai.engine.openai.OpenAIConstants;
+import org.jkiss.dbeaver.model.ai.engine.openai.OpenAIProperties;
 import org.jkiss.dbeaver.model.ai.registry.AIEngineDescriptor;
-import org.jkiss.dbeaver.model.ai.registry.AIEngineRegistry;
 import org.jkiss.dbeaver.model.ai.registry.AISettingsManager;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.utils.CommonUtils;
 
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * AI global settings.
@@ -36,11 +41,17 @@ import java.util.*;
 public class AISettings implements DBPAdaptable {
     protected static final Log log = Log.getLog(AISettings.class);
     private boolean aiDisabled;
-    private String activeEngine;
-    private final Map<String, AIEngineProperties> engineConfigurations = new LinkedHashMap<>();
-    private final Map<String, Object> properties = new LinkedHashMap<>();
-    private final Set<String> resolvedSecrets = new HashSet<>();
 
+    private final Map<String, AIConfigurationProfile> configurations = new LinkedHashMap<>();
+    private String defaultConfiguration;
+    private transient String userDefaultConfiguration;
+
+    private String activeEngine;
+    // Deprecated. Use AIConfigurationProfile instead
+    @Deprecated(forRemoval = true)
+    @JsonAdapter(AISettingsManager.EngineConfigAdapter.class)
+    private final Map<String, AILegacyEngineConfiguration> engineConfigurations = new LinkedHashMap<>();
+    private final Map<String, Object> properties = new LinkedHashMap<>();
     private final Map<String, String> customInstructions = new LinkedHashMap<>();
 
     public AISettings() {
@@ -52,6 +63,173 @@ public class AISettings implements DBPAdaptable {
         }
     }
 
+    @NotNull
+    public AIConfigurationProfile[] getConfigurations() {
+        return configurations.values().toArray(new AIConfigurationProfile[0]);
+    }
+
+    @NotNull
+    public AIConfigurationProfile getDefaultConfiguration() throws DBException {
+        AIConfigurationProfile profile = getDefaultConfigurationOrNull();
+        if (profile == null) {
+            throw new DBException("AI engine is not configured");
+        }
+        profile.getEngineDescriptor();
+        return profile;
+    }
+
+    @Nullable
+    public AIConfigurationProfile getConfigurationOrNull(@NotNull String profileId) {
+        return configurations.get(profileId);
+    }
+
+    @Nullable
+    public AIConfigurationProfile getConfigurationByNameOrNull(@NotNull String profileName) {
+        for (AIConfigurationProfile profile : configurations.values()) {
+            if (Objects.equals(profile.getProfileName(), profileName)) {
+                return profile;
+            }
+        }
+        return null;
+    }
+
+    @NotNull
+    public AIConfigurationProfile getConfiguration(@NotNull String profileId) throws DBException {
+        AIConfigurationProfile profile = getConfigurationOrNull(profileId);
+        if (profile == null) {
+            throw new DBException("AI configuration '" + profileId + "' not found");
+        }
+        return profile;
+    }
+
+    @Nullable
+    public AIConfigurationProfile getDefaultConfigurationOrNull() {
+        AIConfigurationProfile userProfile = configurations.get(userDefaultConfiguration);
+        if (userProfile != null) {
+            return userProfile;
+        }
+        if (CommonUtils.isEmpty(defaultConfiguration)) {
+            if (!configurations.isEmpty()) {
+                defaultConfiguration = configurations.values().iterator().next().getProfileId();
+            }
+        }
+        AIConfigurationProfile profile = configurations.get(defaultConfiguration);
+        if (profile == null) {
+            if (configurations.isEmpty()) {
+                return null;
+            }
+            profile = configurations.values().iterator().next();
+            defaultConfiguration = profile.getProfileId();
+        }
+        return profile;
+    }
+
+    public void setUserDefaultConfiguration(@Nullable AIConfigurationProfile profile) {
+        userDefaultConfiguration = profile == null ? null : profile.getProfileId();
+    }
+
+    public void setDefaultConfiguration(@Nullable AIConfigurationProfile profile) {
+        defaultConfiguration = profile == null ? null : profile.getProfileId();
+        activeEngine = profile == null ? OpenAIConstants.OPENAI_ENGINE : profile.getEngineId();
+    }
+
+    public AIConfigurationProfile createConfiguration(
+        @NotNull String id,
+        @NotNull AIEngineDescriptor engine
+    ) throws DBException {
+        if (id.isBlank()) {
+            throw new DBException("Empty aI configuration ID");
+        }
+        if (configurations.containsKey(id)) {
+            throw new DBException("AI configuration '" + id + "' already exists");
+        }
+        AIConfigurationProfile profile = new AIConfigurationProfile();
+        profile.setProfileId(id);
+        profile.setEngineId(engine.getId());
+        profile.setConfiguration(engine.createPropertiesInstance());
+        profile.resolveSecrets();
+        configurations.put(id, profile);
+
+        return profile;
+    }
+
+    @NotNull
+    public String generateProfileId(@NotNull AIEngineDescriptor engine) {
+        String baseId = engine.getId();
+        String id = baseId;
+        for (int i = 1; getConfigurationOrNull(id) != null; i++) {
+            id = baseId + "_" + i;
+        }
+        return id;
+    }
+
+    @NotNull
+    public String generateProfileName(@NotNull String baseName) {
+        String name = baseName;
+        for (int i = 1; getConfigurationByNameOrNull(name) != null; i++) {
+            name = baseName + " (" + i + ")";
+        }
+        return name;
+    }
+
+    @NotNull
+    public synchronized AIConfigurationProfile copyConfiguration(@NotNull AIConfigurationProfile source) throws DBException {
+        return copyConfiguration(
+            source,
+            generateProfileId(source.getEngineDescriptor()),
+            generateProfileName(source.getProfileName())
+        );
+    }
+
+    @NotNull
+    public synchronized AIConfigurationProfile copyConfiguration(
+        @NotNull AIConfigurationProfile source,
+        @NotNull String id
+    ) throws DBException {
+        return copyConfiguration(source, id, generateProfileName(source.getProfileName()));
+    }
+
+    @NotNull
+    public synchronized AIConfigurationProfile copyConfiguration(
+        @NotNull AIConfigurationProfile source,
+        @NotNull String id,
+        @NotNull String name
+    ) throws DBException {
+        AIConfigurationProfile copy = createConfiguration(id, source.getEngineDescriptor());
+        copy.setProfileName(name);
+        copy.setGlobal(source.isGlobal());
+        AIEngineProperties sourceConfiguration = source.getConfiguration();
+        copy.setConfiguration(AISettingsManager.READ_PROPS_GSON.fromJson(
+            AISettingsManager.READ_PROPS_GSON.toJson(sourceConfiguration),
+            sourceConfiguration.getClass()
+        ));
+        if (!AISettingsManager.saveSecretsAsPlainText()) {
+            copy.saveSecrets();
+        }
+        copy.resolveSecrets();
+        return copy;
+    }
+
+    public void removeConfiguration(@NotNull AIConfigurationProfile profile) {
+        configurations.remove(profile.getProfileId());
+        if (CommonUtils.equalObjects(defaultConfiguration, profile.getProfileId())) {
+            defaultConfiguration = configurations.isEmpty() ? null : configurations.keySet().iterator().next();
+        }
+        // Remove in legacy config too
+        engineConfigurations.remove(profile.getEngineId());
+        if (!profile.isAvailable()) {
+            return;
+        }
+        try {
+            profile.getConfiguration().deleteSecrets(profile);
+        } catch (DBException e) {
+            log.error(e);
+        }
+    }
+
+    /**
+     * Global AI settings used by different modules
+     */
     @NotNull
     public Map<String, Object> getAllProperties() {
         return properties;
@@ -91,86 +269,88 @@ public class AISettings implements DBPAdaptable {
         customInstructions.putAll(instructions);
     }
 
-
     public boolean isAiDisabled() {
         return aiDisabled;
     }
 
+    // Disables AI integration. Saves configuration.
     public void setAiDisabled(boolean aiDisabled) {
         this.aiDisabled = aiDisabled;
-    }
-
-    @Nullable
-    public String activeEngine() {
-        return activeEngine;
-    }
-
-    public void setActiveEngine(@NotNull String activeEngine) {
-        AIEngineDescriptor engineDescriptor = AIEngineRegistry.getInstance().getEngineDescriptor(activeEngine);
-        if (engineDescriptor != null) {
-            // Replacement?
-            activeEngine = engineDescriptor.getId();
-        }
-        this.activeEngine = activeEngine;
-    }
-
-    public boolean hasConfiguration(@NotNull String engineId) {
-        return engineConfigurations.containsKey(engineId);
-    }
-
-    @NotNull
-    public synchronized <T extends AIEngineProperties> T getEngineConfiguration(@NotNull String engineId) throws DBException {
-        AIEngineDescriptor engineDescriptor = AIEngineRegistry.getInstance().getEngineDescriptor(engineId);
-        if (engineDescriptor == null) {
-            throw new DBException("AI engine " + engineId + " not found");
-        }
-
-        AIEngineProperties aiEngineSettings = engineConfigurations.get(engineId);
-        if (aiEngineSettings == null) {
-            aiEngineSettings = engineDescriptor.createPropertiesInstance();
-        }
-
-        if (!AISettingsManager.saveSecretsAsPlainText()) {
-            if (!resolvedSecrets.contains(engineId)) {
-                aiEngineSettings.resolveSecrets();
-                resolvedSecrets.add(engineId);
-            }
-        }
-
-        return (T) aiEngineSettings;
-    }
-
-    @NotNull
-    public Map<String, AIEngineProperties> getEngineConfigurations() {
-        return engineConfigurations;
-    }
-
-    public void setEngineConfiguration(
-        @NotNull String engineId,
-        @NotNull AIEngineProperties engineConfiguration
-    ) {
-        engineConfigurations.put(engineId, engineConfiguration);
-    }
-
-    public void setEngineConfigurations(
-        @NotNull Map<String, AIEngineProperties> engineConfigurations
-    ) {
-        this.engineConfigurations.putAll(engineConfigurations);
-    }
-
-    public void saveSecrets() throws DBException {
-        for (Map.Entry<String, AIEngineProperties> entry : engineConfigurations.entrySet()) {
-            String engineId = entry.getKey();
-            AIEngineProperties engineConfiguration = entry.getValue();
-
-            if (resolvedSecrets.contains(engineId)) {
-                engineConfiguration.saveSecrets();
-            }
-        }
+        AISettingsManager.getInstance().saveSettings(this);
     }
 
     @Override
     public <T> T getAdapter(@NotNull Class<T> adapter) {
         return null;
     }
+
+    // Patches configuration to support legacy configuration format
+    public void finishSettingsLoading() {
+        boolean migrateLegacyConfigurations = configurations.isEmpty() && !engineConfigurations.isEmpty();
+        if (migrateLegacyConfigurations) {
+            // Profiles from engine settings
+            for (Map.Entry<String, AILegacyEngineConfiguration> entry : engineConfigurations.entrySet()) {
+                String engineId = entry.getKey();
+                AIConfigurationProfile profile = AISettingsManager.EngineConfigAdapter.toProfile(engineId, entry.getValue());
+                if (profile.isAvailable()) {
+                    try {
+                        if (profile.getConfiguration() instanceof OpenAIProperties properties
+                            && CommonUtils.isEmpty(properties.getModel())) {
+                            properties.setModel(OpenAIConstants.LEGACY_DEFAULT_MODEL);
+                        }
+                    } catch (DBException e) {
+                        log.error(e);
+                    }
+                }
+                configurations.put(engineId, profile);
+            }
+        }
+
+        // keep the saved engine even when this product does not provide it
+        if (activeEngine == null) {
+            activeEngine = OpenAIConstants.OPENAI_ENGINE;
+        }
+
+        if (migrateLegacyConfigurations) {
+            defaultConfiguration = activeEngine;
+        } else if (!configurations.isEmpty()) {
+            // Set profile IDs
+            for (Map.Entry<String, AIConfigurationProfile> ep : configurations.entrySet()) {
+                ep.getValue().setProfileId(ep.getKey());
+            }
+        }
+    }
+
+    public void prepareSettingsSaving() throws DBException {
+        for (AIConfigurationProfile profile : configurations.values()) {
+            if (!profile.isAvailable()) {
+                continue;
+            }
+            String engineId = profile.getEngineId();
+            if (!engineConfigurations.containsKey(engineId)
+                || profile.isMigrated() && profile.getProfileId().equals(engineId)) {
+                engineConfigurations.put(engineId, new AILegacyEngineConfiguration(profile.getConfiguration()));
+            }
+        }
+        // legacy settings are shared, so a per-user default must not choose their representative
+        AIConfigurationProfile sharedDefault = configurations.get(defaultConfiguration);
+        if (sharedDefault != null && sharedDefault.isAvailable()) {
+            engineConfigurations.put(sharedDefault.getEngineId(), new AILegacyEngineConfiguration(sharedDefault.getConfiguration()));
+        }
+    }
+
+    public void resolveSecrets() {
+        for (AIConfigurationProfile profile : this.getConfigurations()) {
+            if (!profile.isAvailable()) {
+                continue;
+            }
+            try {
+                profile.getConfiguration().resolveSecrets(profile);
+            } catch (DBException e) {
+                log.error("Error resolving profile '" + profile.getProfileId() + "' secrets", e);
+            }
+        }
+    }
+
+
 }

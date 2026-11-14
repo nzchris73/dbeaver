@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,21 +19,28 @@ package org.jkiss.dbeaver.ui.controls.resultset.panel.aggregate;
 import org.eclipse.jface.action.*;
 import org.eclipse.jface.dialogs.IDialogSettings;
 import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.ISelectionChangedListener;
 import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.dnd.TextTransfer;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.widgets.*;
 import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBIcon;
 import org.jkiss.dbeaver.model.DBPImage;
 import org.jkiss.dbeaver.model.DBValueFormatting;
 import org.jkiss.dbeaver.model.data.DBDAttributeBinding;
+import org.jkiss.dbeaver.model.data.DBDDataFormatter;
+import org.jkiss.dbeaver.model.data.DBDDataFormatterProfile;
+import org.jkiss.dbeaver.model.data.DBDFormatSettings;
 import org.jkiss.dbeaver.model.data.aggregate.IAggregateFunction;
+import org.jkiss.dbeaver.model.impl.SimpleTypedObject;
+import org.jkiss.dbeaver.model.impl.data.formatters.DefaultDataFormatter;
+import org.jkiss.dbeaver.registry.formatter.DataFormatterRegistry;
 import org.jkiss.dbeaver.registry.functions.AggregateFunctionDescriptor;
 import org.jkiss.dbeaver.registry.functions.FunctionsRegistry;
 import org.jkiss.dbeaver.ui.*;
@@ -43,8 +50,6 @@ import org.jkiss.dbeaver.ui.controls.resultset.internal.ResultSetMessages;
 import org.jkiss.dbeaver.ui.controls.resultset.panel.ResultSetPanelBase;
 import org.jkiss.dbeaver.ui.internal.UIMessages;
 
-import java.math.BigDecimal;
-import java.text.DecimalFormat;
 import java.util.List;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -61,9 +66,6 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
     public static final String SETTINGS_SECTION_AGGREGATE = "panel-" + PANEL_ID;
     public static final String PARAM_GROUP_BY_COLUMNS = "groupByColumns";
     public static final String PARAM_GROUP_AS_STRINGS = "groupAsStrings";
-
-    private static final DecimalFormat DOUBLE_FORMAT = new DecimalFormat("###,###,###,###,###,##0.###");
-    private static final DecimalFormat INTEGER_FORMAT = new DecimalFormat("###,###,###,###,###,##0");
 
     private IResultSetPresentation presentation;
     private Tree aggregateTable;
@@ -93,12 +95,14 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
         new TreeColumn(this.aggregateTable, SWT.LEFT).setText(ResultSetMessages.aggregate_columns_function_text);
         new TreeColumn(this.aggregateTable, SWT.LEFT).setText(ResultSetMessages.aggregate_columns_value_text);
 
-        if (this.presentation instanceof ISelectionProvider) {
-            ((ISelectionProvider) this.presentation).addSelectionChangedListener(event -> {
+        if (this.presentation instanceof ISelectionProvider selectionProvider) {
+            ISelectionChangedListener listener = event -> {
                 if (presentation.getController().getVisiblePanel() == AggregateColumnsPanel.this) {
                     refresh(false);
                 }
-            });
+            };
+            selectionProvider.addSelectionChangedListener(listener);
+            aggregateTable.addDisposeListener(e -> selectionProvider.removeSelectionChangedListener(listener));
         }
 
         MenuManager menuMgr = new MenuManager();
@@ -113,12 +117,8 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
         this.aggregateTable.setMenu(menuMgr.createContextMenu(this.aggregateTable));
         this.aggregateTable.addDisposeListener(e -> menuMgr.dispose());
 
-        aggregateTable.addSelectionListener(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
-                presentation.getController().updatePanelActions();
-            }
-        });
+        aggregateTable.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+            presentation.getController().updatePanelActions()));
 
         return this.aggregateTable;
     }
@@ -293,6 +293,9 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
                 }
             }
         }
+        DBDFormatSettings formatSettings = presentation.getController().getModel().getFormatSettings();
+        boolean useNativeFormatter = formatSettings != null && formatSettings.isUseNativeNumericFormat();
+        DBDDataFormatter numberFormatter = createNumberFormatter(formatSettings);
         for (int i = 0; i < funcs.length; i++) {
             if (funcCount[i] <= 0) {
                 continue;
@@ -302,10 +305,10 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
             if (result != null) {
                 TreeItem treeItem = funcMap.get(func);
                 String strValue;
-                if (result instanceof Double || result instanceof Float || result instanceof BigDecimal) {
-                    strValue = DOUBLE_FORMAT.format(result);
-                } else if (result instanceof Integer || result instanceof Long || result instanceof Short) {
-                    strValue = INTEGER_FORMAT.format(result);
+                if (result instanceof Number) {
+                    strValue = useNativeFormatter ?
+                        DBValueFormatting.convertNumberToNativeString((Number) result, formatSettings.isUseScientificNumericFormat()) :
+                        numberFormatter.formatValue(result);
                 } else {
                     strValue = result.toString();
                 }
@@ -313,6 +316,21 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
                     treeItem.setText(1, strValue);
                 }
             }
+        }
+    }
+
+    @NotNull
+    private DBDDataFormatter createNumberFormatter(@Nullable DBDFormatSettings formatSettings) {
+        DBDDataFormatterProfile profile = formatSettings == null ?
+            DataFormatterRegistry.getInstance().getGlobalProfile() :
+            formatSettings.getDataFormatterProfile();
+        try {
+            // The max fraction digits setting is applied only when the type is not null.
+            // The type has no scale because the selection may span several columns.
+            return profile.createFormatter(DBDDataFormatter.TYPE_NAME_NUMBER, SimpleTypedObject.DEFAULT_TYPE);
+        } catch (Exception e) {
+            log.error("Can't create number formatter", e);
+            return DefaultDataFormatter.INSTANCE;
         }
     }
 
@@ -327,7 +345,7 @@ public class AggregateColumnsPanel extends ResultSetPanelBase {
         contributionManager.add(item);
         contributionManager.add(new RemoveFunctionAction());
         contributionManager.add(new ResetFunctionsAction());
-        contributionManager.add(new ToolbarSeparatorContribution(true));
+        contributionManager.add(contributionManager instanceof IToolBarManager ? new ToolbarSeparatorContribution(true) : new Separator());
         contributionManager.add(new GroupByColumnsAction());
         contributionManager.add(new ValueTypeToggleAction());
     }

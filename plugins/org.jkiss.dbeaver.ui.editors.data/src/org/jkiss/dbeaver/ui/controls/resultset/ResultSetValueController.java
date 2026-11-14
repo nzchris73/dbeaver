@@ -119,15 +119,21 @@ public class ResultSetValueController implements IAttributeController, IRowContr
     public DBSTypedObject getValueType() {
         if (cellLocation.getValuePath() != null) {
             for (ResultSetValuePath.PathItem pathItem : cellLocation.getValuePath().pathItems().reversed()) {
-                if (pathItem instanceof ResultSetValuePath.PathAttributeItem attrItem) {
-                    DBSAttributeBase typedAttr = attrItem.attribute();
-                    if (typedAttr.getDataKind() == DBPDataKind.ARRAY) {
-                        DBSDataType componentType = getComponentType(typedAttr);
+                if (pathItem instanceof ResultSetValuePath.PathAttributeItem(DBSAttributeBase item)) {
+                    if (item.getDataKind() == DBPDataKind.ARRAY) {
+                        DBSDataType componentType = getComponentType(item);
                         if (componentType != null) {
                             return componentType;
                         }
                     } else {
-                        return typedAttr;
+                        if (item instanceof DBDAttributeBinding binding) {
+                            var valueType = binding.getPresentationAttribute();
+                            if (valueType != null) {
+                                return valueType;
+                            }
+                            return binding.getAttribute();
+                        }
+                        return item;
                     }
                 }
             }
@@ -236,7 +242,8 @@ public class ResultSetValueController implements IAttributeController, IRowContr
         boolean updated;
         try {
             updated = controller.updateCellValue(
-                cellLocation.getAttribute(), cellLocation.getRow(), cellLocation.getRowIndexes(), value, updatePresentation);
+                cellLocation.getAttribute(), cellLocation.getRow(), cellLocation.getRowIndexes(),
+                cellLocation.getValuePath(), value, updatePresentation);
         } catch (Exception e) {
             UIUtils.asyncExec(() ->
                 DBWorkbench.getPlatformUI().showError("Value update", "Error updating value: " + e.getMessage(), e));

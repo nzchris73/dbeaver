@@ -27,26 +27,33 @@ import org.jkiss.dbeaver.model.task.DBTTask;
 /**
  * Data transfer
  */
-public interface IDataTransferProducer<SETTINGS extends IDataTransferSettings> extends IDataTransferNode<SETTINGS> {
+public interface IDataTransferProducer<SETTINGS extends IDataTransferSettings> extends IDataTransferNode<SETTINGS>, AutoCloseable {
 
     /**
      * Transfer data to consumer
+     *
      * @param monitor   progress monitor
      * @param consumer  transfer consumer
      * @param processor transfer processor (optional)
      * @param settings  settings
      * @param task      task (optional)
+     * @param maxRows   maximum rows to transfer. <= 0 means no limits.
      */
     void transferData(
         @NotNull DBRProgressMonitor monitor,
         @NotNull IDataTransferConsumer consumer,
         @Nullable IDataTransferProcessor processor,
         @NotNull SETTINGS settings,
-        @Nullable DBTTask task
+        @Nullable DBTTask task,
+        long maxRows
     ) throws DBException;
 
     @NotNull
     default DBCStatistics getStatistics() {
         return new DBCStatistics();
+    }
+
+    @Override
+    default void close() throws DBException {
     }
 }

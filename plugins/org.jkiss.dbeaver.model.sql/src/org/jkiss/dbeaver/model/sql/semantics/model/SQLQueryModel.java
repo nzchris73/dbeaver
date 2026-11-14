@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,14 +63,18 @@ public class SQLQueryModel extends SQLQueryNodeModel {
         return this.queryContent;
     }
 
-    /**
-     * Propagate semantics context and establish relations through the query model
-     */
-    public void resolveRelations(@NotNull SQLQueryRowsSourceContext rowsContext, @NotNull SQLQueryRecognitionContext recognitionContext) {
+    public boolean tryResolveRelations(@NotNull SQLQueryRowsSourceContext rowsContext, @NotNull SQLQueryRecognitionContext recognitionContext) {
 
         if (this.queryContent != null) {
             this.queryContent.resolveObjectAndRowsReferences(rowsContext, recognitionContext);
-            this.queryContent.resolveValueRelations(rowsContext.makeEmptyTuple(), recognitionContext);
+
+            if (recognitionContext.getMonitor().isCanceled()) {
+                return false;
+            }
+
+            if (!this.queryContent.tryResolveValueRelations(rowsContext.makeEmptyTuple(), recognitionContext)) {
+                return false;
+            }
         }
 
         int actualTailPosition = this.getSyntaxNode().getRealInterval().b;
@@ -87,6 +91,9 @@ public class SQLQueryModel extends SQLQueryNodeModel {
                 this.setTailOrigin(tailOrigin);
             }
         }
+
+        // ensure we didn't misinterpret cancellation during metadata reading as resolution failure
+        return !recognitionContext.getMonitor().isCanceled();
     }
 
     /**
@@ -117,10 +124,10 @@ public class SQLQueryModel extends SQLQueryNodeModel {
         ListNode<SQLQueryNodeModel> stack = ListNode.of(this);
         { // walk down through the model till the deepest node describing given position
             SQLQueryNodeModel node = this;
-            SQLQueryNodeModel nested = node.findChildNodeContaining(textOffset);
+            SQLQueryNodeModel nested = node.findChildNodeForLexicalContext(textOffset);
             while (nested != null) {
                 stack = ListNode.push(stack, nested);
-                nested = nested.findChildNodeContaining(textOffset);
+                nested = nested.findChildNodeForLexicalContext(textOffset);
             }
         }
 

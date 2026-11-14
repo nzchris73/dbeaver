@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import org.jkiss.utils.StandardConstants;
  */
 public class DTConstants {
 
+    public static final String PLUGIN_ID = "org.jkiss.dbeaver.data.transfer";
+
     public static final String TASK_IMPORT = "dataImport";
     public static final String TASK_EXPORT = "dataExport";
 
@@ -31,6 +33,7 @@ public class DTConstants {
     public static final String PREF_FALLBACK_OUTPUT_DIRECTORY = "fallbackOutputDirectory";
     public static final String DEFAULT_FALLBACK_OUTPUT_DIRECTORY = System.getProperty(StandardConstants.ENV_TMP_DIR);
     public static final String PREF_RECONNECT_TO_LAST_DATABASE = "reconnectToLastDatabase";
+    public static final String PREF_CAPTURE_UNSAVED_TASK_LOGS = "captureUnsavedTaskLogs";
 
     public static final String PREF_NAME_CASE_MAPPING = "nameCaseMapping";
     public static final String PREF_REPLACE_MAPPING = "replaceMapping";
@@ -46,6 +49,12 @@ public class DTConstants {
     public static final String PROP_PROCESSOR_TYPE = "processor";
     public static final String PROP_PROCESSORS_LIST = "processors";
     public static final String PROP_NAME = "@propNames";
+
+    // Database consumer settings keys (shared between the desktop and cloudbeaver)
+    public static final String PROP_ON_DUPLICATE_KEY_METHOD = "onDuplicateKeyMethod";
+    public static final String PROP_USE_BULK_LOAD = "useBulkLoad";
+    public static final String PROP_USE_TRANSACTIONS = "useTransactions";
+    public static final String PROP_OPEN_NEW_CONNECTION = "openNewConnection";
 
     public static final int DEFAULT_MAX_TYPE_LENGTH = 32767; // Max Oracle VARCHAR data type length
 

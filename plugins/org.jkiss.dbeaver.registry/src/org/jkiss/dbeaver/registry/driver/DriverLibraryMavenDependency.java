@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,15 @@
  */
 package org.jkiss.dbeaver.registry.driver;
 
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.registry.maven.MavenArtifact;
 import org.jkiss.dbeaver.registry.maven.MavenArtifactDependency;
 import org.jkiss.dbeaver.registry.maven.MavenArtifactReference;
 import org.jkiss.dbeaver.registry.maven.MavenArtifactVersion;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -31,24 +35,56 @@ public class DriverLibraryMavenDependency extends DriverLibraryMavenArtifact
     private DriverLibraryMavenArtifact parent;
     private MavenArtifactDependency source;
 
-    public DriverLibraryMavenDependency(DriverLibraryMavenArtifact parent, MavenArtifactVersion localVersion, MavenArtifactDependency source) {
+    public DriverLibraryMavenDependency(
+        @NotNull DriverLibraryMavenArtifact parent,
+        @NotNull MavenArtifactVersion localVersion,
+        @NotNull MavenArtifactDependency source
+    ) {
         super(parent.getDriver(), FileType.jar, PATH_PREFIX + localVersion.toString(), null);
         this.parent = parent;
         this.localVersion = localVersion;
         this.source = source;
     }
 
+    @Nullable
+    @Override
+    public Path getLocalFile() {
+        if (localVersion == null || localVersion.isInvalidVersion()) {
+            return null;
+        }
+        return MavenArtifact.FILE_JAR.equals(source.getType()) ?
+            localVersion.getCacheFile(MavenArtifact.FILE_JAR) : localVersion.getCacheFile();
+    }
+
+    @Nullable
+    @Override
+    public String getExternalURL(@NotNull DBRProgressMonitor monitor) {
+        MavenArtifactVersion version = getArtifactVersion(monitor);
+        if (version == null) {
+            return null;
+        }
+        return MavenArtifact.FILE_JAR.equals(source.getType()) ?
+            version.getExternalURL(MavenArtifact.FILE_JAR) : version.getExternalURL();
+    }
+
     protected boolean isDependencyExcluded(DBRProgressMonitor monitor, MavenArtifactDependency dependency) {
         List<MavenArtifactReference> exclusions = source.getExclusions();
         if (exclusions != null) {
             for (MavenArtifactReference exReference : exclusions) {
-                if (exReference.getGroupId().equals(dependency.getGroupId()) && exReference.getArtifactId().equals(dependency.getArtifactId())) {
+                if (matchesExclusionPart(exReference.getGroupId(), dependency.getGroupId()) &&
+                    matchesExclusionPart(exReference.getArtifactId(), dependency.getArtifactId())
+                ) {
                     return true;
                 }
             }
         }
 
         return parent.isDependencyExcluded(monitor, dependency);
+    }
+
+    // Maven allows '*' wildcard in exclusions to exclude all dependencies
+    private boolean matchesExclusionPart(@NotNull String exclusionPart, @NotNull String dependencyPart) {
+        return "*".equals(exclusionPart) || exclusionPart.equals(dependencyPart);
     }
 
 }

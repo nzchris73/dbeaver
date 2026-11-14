@@ -81,6 +81,7 @@ public class DatabaseNavigatorTree extends Composite implements INavigatorListen
     private static final boolean INLINE_RENAME_ENABLED = false;
 
     private final TreeViewer treeViewer;
+    private int horizontalScrollOffset;
     private DBNModel model;
     private TreeEditor treeEditor;
     private boolean checkEnabled;
@@ -169,6 +170,20 @@ public class DatabaseNavigatorTree extends Composite implements INavigatorListen
 
         {
             tree.addListener(SWT.PaintItem, event -> onPaintItem(tree, event));
+            if (RuntimeUtils.isMacOS()) {
+                tree.addPaintListener(event -> {
+                    int scrollOffset = tree.getClientArea().x;
+                    if (horizontalScrollOffset != scrollOffset) {
+                        horizontalScrollOffset = scrollOffset;
+                        // cocoa copies viewport-aligned node actions along with the scrolled content
+                        UIUtils.asyncExec(() -> {
+                            if (!tree.isDisposed()) {
+                                tree.redraw();
+                            }
+                        });
+                    }
+                });
+            }
             // FIXME: this is a weird workaround of paint problems
             // FIXME: whenever we click on already selected item in the tree paint breaks
             // FIXME: (only the item is paintedm the rest is whitespace)
@@ -614,10 +629,15 @@ public class DatabaseNavigatorTree extends Composite implements INavigatorListen
         }
 
         @Override
-        public IStatus runInUIThread(IProgressMonitor monitor) {
+        @NotNull
+        public IStatus runInUIThread(@NotNull IProgressMonitor monitor) {
+            Tree tree = treeViewer.getTree();
+            if (tree.isDisposed()) {
+                return Status.OK_STATUS;
+            }
             synchronized (nodeInLoadingProcess) {
                 long nextDelay = WAIT_DELAY;
-                if (!nodeInLoadingProcess.isEmpty()) {
+                if (!nodeInLoadingProcess.isEmpty() && !UIUtils.isShellBlocked(tree.getShell())) {
                     ticksCount++;
                     for (DBNNode node : nodeInLoadingProcess) {
                         Widget widget = treeViewer.testFindItem(node);
@@ -629,7 +649,7 @@ public class DatabaseNavigatorTree extends Composite implements INavigatorListen
                 } else {
                     ticksCount = 0;
                 }
-                if (!treeViewer.getTree().isDisposed()) {
+                if (!tree.isDisposed()) {
                     schedule(nextDelay);
                 }
             }
@@ -945,11 +965,7 @@ public class DatabaseNavigatorTree extends Composite implements INavigatorListen
                     if (hasVisibleConnections(viewer, lf)) {
                         return true;
                     }
-                } else if (isLeafMatch(viewer, child)) {
-                    if (filterShowConnected && child instanceof DBNDataSource && !((DBNDataSource) child).getDataSourceContainer().isConnected()) {
-                        continue;
-                    }
-
+                } else if (isElementVisible(viewer, child)) {
                     return true;
                 }
             }

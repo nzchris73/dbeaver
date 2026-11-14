@@ -19,8 +19,6 @@ package org.jkiss.dbeaver.tools.transfer.ui.pages.stream;
 import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.*;
@@ -183,9 +181,9 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
     private final Map<String, EventProcessorComposite<?>> processors = new HashMap<>();
 
     public StreamConsumerPageOutput() {
-        super(DTMessages.data_transfer_wizard_output_name);
-        setTitle(DTMessages.data_transfer_wizard_output_title);
-        setDescription(DTMessages.data_transfer_wizard_output_description);
+        super(DTUIMessages.data_transfer_wizard_output_name);
+        setTitle(DTUIMessages.data_transfer_wizard_output_title);
+        setDescription(DTUIMessages.data_transfer_wizard_output_description);
         setPageComplete(false);
     }
 
@@ -228,16 +226,12 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
                 encodingBOMCheckbox = UIUtils.createCheckbox(
                     advancedSettingPanel,
                     DTMessages.data_transfer_wizard_output_label_insert_bom,
-                    DTMessages.data_transfer_wizard_output_label_insert_bom_tooltip,
+                    DTUIMessages.data_transfer_wizard_output_label_insert_bom_tooltip,
                     false,
                     3
                 );
-                encodingBOMCheckbox.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
-                        settings.setOutputEncodingBOM(encodingBOMCheckbox.getSelection());
-                    }
-                });
+                encodingBOMCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                    settings.setOutputEncodingBOM(encodingBOMCheckbox.getSelection())));
                 timestampPattern = UIUtils.createLabelText(
                     advancedSettingPanel,
                     DTMessages.data_transfer_wizard_output_label_timestamp_pattern,
@@ -251,17 +245,14 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
                 singleFileCheck = UIUtils.createCheckbox(
                     advancedSettingPanel,
                     DTMessages.data_transfer_wizard_output_label_use_single_file,
-                    DTMessages.data_transfer_wizard_output_label_use_single_file_tip,
+                    DTUIMessages.data_transfer_wizard_output_label_use_single_file_tip,
                     false,
                     5
                 );
-                singleFileCheck.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
+                singleFileCheck.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                         settings.setUseSingleFile(singleFileCheck.getSelection());
                         updateControlsEnablement();
-                    }
-                });
+                    }));
                 compressCheckbox = UIUtils.createCheckbox(
                     advancedSettingPanel,
                     DTMessages.data_transfer_wizard_output_checkbox_compress,
@@ -269,13 +260,10 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
                     false,
                     5
                 );
-                compressCheckbox.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
+                compressCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                         settings.setCompressResults(compressCheckbox.getSelection());
                         updateControlsEnablement();
-                    }
-                });
+                    }));
 
                 createOutputFilesSplitPanel(advancedSettingPanel, settings);
                 createFileConflictResolutionPanel(advancedSettingPanel, settings);
@@ -300,12 +288,8 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
             );
 
             showFinalMessageCheckbox = UIUtils.createCheckbox(resultsSettings, DTUIMessages.stream_consumer_page_output_label_show_finish_message, getWizard().getSettings().isShowFinalMessage());
-            showFinalMessageCheckbox.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
-                    getWizard().getSettings().setShowFinalMessage(showFinalMessageCheckbox.getSelection());
-                }
-            });
+            showFinalMessageCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                getWizard().getSettings().setShowFinalMessage(showFinalMessageCheckbox.getSelection())));
 
             final DataTransferRegistry dataTransferRegistry = DataTransferRegistry.getInstance();
             final UIPropertyConfiguratorRegistry configuratorRegistry = UIPropertyConfiguratorRegistry.getInstance();
@@ -337,7 +321,7 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
 
         UIUtils.createLink(
             composite,
-            DTMessages.data_transfer_wizard_output_export_to_external_storage_link,
+            DTUIMessages.data_transfer_wizard_output_export_to_external_storage_link,
             SelectionListener.widgetSelectedAdapter(
                 e -> ShellUtils.launchProgram(HelpUtils.getHelpExternalReference(HELP_DT_EXTERNAL_LINK)))
         );
@@ -349,7 +333,7 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
     private void createGeneralSettingSPanel(@NotNull Composite composite, @NotNull StreamConsumerSettings settings) {
         Composite generalSettings = UIUtils.createTitledComposite(
             composite,
-            DTMessages.data_transfer_wizard_output_group_general,
+            DTUIMessages.data_transfer_wizard_output_group_general,
             2,
             GridData.FILL_HORIZONTAL
         );
@@ -360,25 +344,17 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
             false,
             1
         );
-        clipboardCheck.addSelectionListener(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
+        clipboardCheck.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                 settings.setOutputClipboard(clipboardCheck.getSelection());
                 updateControlsEnablement();
                 updatePageCompletion();
-            }
-        });
+            }));
         UIUtils.createPushButton(
             generalSettings,
             null,
-            DTMessages.data_transfer_wizard_output_label_global_settings,
+            DTUIMessages.data_transfer_wizard_output_label_global_settings,
             UIIcon.CONFIGURATION,
-            new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
-                    UIUtils.showPreferencesFor(getShell(), null, PrefPageDataTransfer.PAGE_ID);
-                }
-            }
+            SelectionListener.widgetSelectedAdapter(e -> UIUtils.showPreferencesFor(getShell(), null, PrefPageDataTransfer.PAGE_ID))
         ).setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_END));
 
         // Output path/pattern
@@ -408,18 +384,15 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
 
         splitFilesCheckbox = UIUtils.createCheckbox(
             outFilesSettings,
-            DTMessages.data_transfer_wizard_output_checkbox_split_files,
-            DTMessages.data_transfer_wizard_output_checkbox_split_files_tip,
+            DTUIMessages.data_transfer_wizard_output_checkbox_split_files,
+            DTUIMessages.data_transfer_wizard_output_checkbox_split_files_tip,
             false,
             1
         );
-        splitFilesCheckbox.addSelectionListener(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
+        splitFilesCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                 settings.setSplitOutFiles(splitFilesCheckbox.getSelection());
                 updateControlsEnablement();
-            }
-        });
+            }));
         maximumFileSizeLabel = UIUtils.createControlLabel(
             outFilesSettings,
             DTUIMessages.stream_consumer_page_output_label_maximum_file_size
@@ -435,6 +408,7 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
 
     private void createFileConflictResolutionPanel(@NotNull Composite advancedSettingPanel, @NotNull StreamConsumerSettings settings) {
         final ExpandableComposite fcExpander = new ExpandableComposite(advancedSettingPanel, SWT.NONE);
+        fcExpander.setText(DTUIMessages.data_transfer_file_name_conflict_behavior_setting_text);
         fcExpander.setLayoutData(new GridData(
             GridData.FILL,
             GridData.BEGINNING,
@@ -446,13 +420,11 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
         fcExpander.addExpansionListener(new ExpansionAdapter() {
             @Override
             public void expansionStateChanged(ExpansionEvent e) {
-                updateFileConflictExpanderTitle(fcExpander, settings);
                 UIUtils.resizeShell(advancedSettingPanel.getShell());
             }
         });
         Composite fileConflictBehaviorSettings = UIUtils.createComposite(fcExpander, 2);
         fcExpander.setClient(fileConflictBehaviorSettings);
-        updateFileConflictExpanderTitle(fcExpander, settings);
 
         dataFileConflictBehaviorSelector = new EnumSelectionGroup<>(
             fileConflictBehaviorSettings,
@@ -465,10 +437,7 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
             ),
             v -> v.title,
             DataFileConflictBehavior.ASK,
-            v -> {
-                settings.setDataFileConflictBehavior(v);
-                updateFileConflictExpanderTitle(fcExpander, settings);
-            },
+            settings::setDataFileConflictBehavior,
             v -> v != DataFileConflictBehavior.OVERWRITE || confirmPossibleFileOverwrite()
         );
         blobFileConflictBehaviorSelector = new EnumSelectionGroup<>(
@@ -477,22 +446,9 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
             List.of(BlobFileConflictBehavior.ASK, BlobFileConflictBehavior.PATCHNAME, BlobFileConflictBehavior.OVERWRITE),
             v -> v.title,
             BlobFileConflictBehavior.ASK,
-            v -> {
-                settings.setBlobFileConflictBehavior(v);
-                updateFileConflictExpanderTitle(fcExpander, settings);
-            },
+            settings::setBlobFileConflictBehavior,
             v -> v != BlobFileConflictBehavior.OVERWRITE || confirmPossibleFileOverwrite()
         );
-    }
-
-    private void updateFileConflictExpanderTitle(ExpandableComposite expander, StreamConsumerSettings settings) {
-        if (expander.isExpanded()) {
-            expander.setText(DTMessages.data_transfer_file_name_conflict_behavior_setting_text);
-        } else {
-            String text = DTMessages.data_transfer_file_conflict_behavior_setting + ": " + settings.getDataFileConflictBehavior().title +
-                "; " + DTMessages.data_transfer_blob_file_conflict_behavior_setting + ": " + settings.getBlobFileConflictBehavior().title;
-            expander.setText(text);
-        }
     }
 
     private void updateControlsEnablement() {
@@ -590,23 +546,23 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
         }
 
         if (CommonUtils.isEmpty(settings.getOutputFolder())) {
-            setErrorMessage(DTMessages.data_transfer_wizard_output_error_empty_output_directory);
+            setErrorMessage(DTUIMessages.data_transfer_wizard_output_error_empty_output_directory);
             return false;
         }
         if (CommonUtils.isEmpty(settings.getOutputFilePattern())) {
-            setErrorMessage(DTMessages.data_transfer_wizard_output_error_empty_output_filename);
+            setErrorMessage(DTUIMessages.data_transfer_wizard_output_error_empty_output_filename);
             return false;
         }
         try {
             Charset.forName(settings.getOutputEncoding());
         } catch (Exception e) {
-            setErrorMessage(DTMessages.data_transfer_wizard_output_error_invalid_charset);
+            setErrorMessage(DTUIMessages.data_transfer_wizard_output_error_invalid_charset);
             return false;
         }
 
         for (EventProcessorComposite<?> processor : processors.values()) {
             if (processor.isProcessorApplicable() && processor.isProcessorEnabled() && !processor.isProcessorComplete()) {
-                setErrorMessage(NLS.bind(DTMessages.data_transfer_wizard_output_event_processor_error_incomplete_configuration, processor.getDescriptor().getLabel()));
+                setErrorMessage(NLS.bind(DTUIMessages.data_transfer_wizard_output_event_processor_error_incomplete_configuration, processor.getDescriptor().getLabel()));
                 return false;
             }
         }
@@ -615,8 +571,8 @@ public class StreamConsumerPageOutput extends DataTransferPageNodeSettings {
     
     private boolean confirmPossibleFileOverwrite() {
         return DBWorkbench.getPlatformUI().confirmAction(
-            DTMessages.data_transfer_file_conflict_confirm_override_title, 
-            DTMessages.data_transfer_file_conflict_confirm_override_message,
+            DTUIMessages.data_transfer_file_conflict_confirm_override_title,
+            DTUIMessages.data_transfer_file_conflict_confirm_override_message,
             true
         );
     }

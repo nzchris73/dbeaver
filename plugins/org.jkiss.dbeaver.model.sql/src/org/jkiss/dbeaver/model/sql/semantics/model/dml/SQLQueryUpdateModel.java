@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsDataContext;
 import org.jkiss.dbeaver.model.sql.semantics.context.SQLQueryRowsSourceContext;
 import org.jkiss.dbeaver.model.sql.semantics.model.SQLQueryModelContent;
 import org.jkiss.dbeaver.model.sql.semantics.model.SQLQueryNodeModelVisitor;
-import org.jkiss.dbeaver.model.sql.semantics.model.expressions.SQLQueryValueColumnReferenceExpression;
+import org.jkiss.dbeaver.model.sql.semantics.model.expressions.SQLQueryValueTargetReferenceExpression;
 import org.jkiss.dbeaver.model.sql.semantics.model.expressions.SQLQueryValueExpression;
 import org.jkiss.dbeaver.model.sql.semantics.model.select.SQLQueryRowsSourceModel;
 import org.jkiss.dbeaver.model.stm.STMKnownRuleNames;
@@ -109,8 +109,12 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
                         : switch (setTargetNode.getNodeKindId()) {
                             case SQLStandardParser.RULE_setTarget -> {
                                 STMTreeNode targetNameNode = setTargetNode.findFirstNonErrorChild();
-                                SQLQuerySymbolEntry targetName = targetNameNode == null ? null : recognizer.collectIdentifier(targetNameNode, null);
-                                yield List.of(new SQLQueryValueColumnReferenceExpression(setTargetNode, targetName));
+                                STMTreeNode identifier = targetNameNode == null ? null
+                                    : STMKnownRuleNames.identifier.equals(targetNameNode.getNodeName()) ? targetNameNode
+                                    : targetNameNode.findFirstChildOfName(STMKnownRuleNames.identifier);
+                                SQLQuerySymbolEntry targetName = identifier == null
+                                    ? null : recognizer.collectLocalVariableName(identifier);
+                                yield List.of(new SQLQueryValueTargetReferenceExpression(setTargetNode, targetName));
                             }
                             case SQLStandardParser.RULE_setTargetList ->
                                 STMUtils.expandSubtree(
@@ -271,10 +275,12 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
     }
 
     @Override
-    public void resolveValueRelations(@NotNull SQLQueryRowsDataContext context, @NotNull SQLQueryRecognitionContext statistics) {
+    public boolean tryResolveValueRelations(@NotNull SQLQueryRowsDataContext context, @NotNull SQLQueryRecognitionContext statistics) {
         SQLQueryRowsDataContext targetContext;
         if (this.targetRows != null) {
-            this.targetRows.resolveValueRelations(context, statistics);
+            if (!this.targetRows.tryResolveValueRelations(context, statistics)) {
+                return false;
+            }
             targetContext = this.targetRows.getRowsDataContext();
 
             if (this.targetsScope != null) {
@@ -284,7 +290,9 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
                 for (SQLQueryUpdateSetClauseModel updateSetClauseModel : this.setClauseList) {
                     // resolve target columns against target set
                     for (SQLQueryValueExpression valueExpression : updateSetClauseModel.targets) {
-                        valueExpression.resolveValueRelations(targetContext, statistics);
+                        if (!valueExpression.tryResolveValueRelations(targetContext, statistics)) {
+                            return false;
+                        }
                     }
                 }
             }
@@ -295,7 +303,9 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
 
         SQLQueryRowsDataContext sourceContext;
         if (this.sourceRows != null) {
-            this.sourceRows.resolveValueRelations(context, statistics);
+            if (!this.sourceRows.tryResolveValueRelations(context, statistics)) {
+                return false;
+            }
             sourceContext = this.sourceRows.getRowsDataContext();
         } else {
             sourceContext = context;
@@ -309,16 +319,22 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
             for (SQLQueryUpdateSetClauseModel setClauseModel : this.setClauseList) {
                 // resolve source value expressions against combined participating sets
                 for (SQLQueryValueExpression valueExpression : setClauseModel.sources) {
-                    valueExpression.resolveValueRelations(context, statistics);
+                    if (!valueExpression.tryResolveValueRelations(context, statistics)) {
+                        return false;
+                    }
                 }
             }
         }
         
         if (this.whereClause != null) {
-            this.whereClause.resolveValueRelations(context, statistics);
+            if (!this.whereClause.tryResolveValueRelations(context, statistics)) {
+                return false;
+            }
         }
         if (this.orderByClause != null) {
-            this.orderByClause.resolveValueRelations(context, statistics);
+            if (!this.orderByClause.tryResolveValueRelations(context, statistics)) {
+                return false;
+            }
         }
 
         if (this.conditionsScope != null) {
@@ -328,6 +344,7 @@ public class SQLQueryUpdateModel extends SQLQueryModelContent {
         if (this.tailScope != null) {
             this.setTailOrigin(this.tailScope.getSymbolsOrigin());
         }
+        return true;
     }
 
     @Override

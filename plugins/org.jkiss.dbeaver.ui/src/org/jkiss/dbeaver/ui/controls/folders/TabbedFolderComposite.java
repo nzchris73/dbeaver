@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,7 @@
 package org.jkiss.dbeaver.ui.controls.folders;
 
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.FillLayout;
@@ -35,9 +34,11 @@ import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.css.CSSUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 
 
@@ -100,9 +101,7 @@ public class TabbedFolderComposite extends ConComposite implements ITabbedFolder
                     e.gc.drawLine(0, 0, e.width - 1, 0);
                     e.gc.drawLine(0, e.height - 1, e.width - 1, e.height - 1);
                 });
-                sash.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
+                sash.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                         // Resize folders
                         Rectangle sashBounds = sash.getBounds();
 
@@ -123,18 +122,13 @@ public class TabbedFolderComposite extends ConComposite implements ITabbedFolder
                                 TabbedFolderComposite.this.setRedraw(true);
                             }
                         }
-                    }
-                });
+                    }));
             } else {
                 this.sash = null;
             }
 
-            folderList.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
-                    onFolderSwitch(folderList.getElementAt(folderList.getSelectionIndex()).getInfo());
-                }
-            });
+            folderList.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                onFolderSwitch(folderList.getElementAt(folderList.getSelectionIndex()).getInfo())));
         }
 
         public void setFolders(TabbedFolderInfo[] folders) {
@@ -352,6 +346,34 @@ public class TabbedFolderComposite extends ConComposite implements ITabbedFolder
         return folderState;
     }
 
+    public void setFolderFilter(@NotNull Predicate<TabbedFolderInfo> filter) {
+        for (FolderPane pane : folderPanes) {
+            TabbedFolderInfo[] visibleFolders = Arrays.stream(pane.folders).filter(filter).toArray(TabbedFolderInfo[]::new);
+            pane.folderList.setFolders(visibleFolders);
+            if (visibleFolders.length == 0) {
+                if (pane.curFolder != null) {
+                    pane.curFolder.aboutToBeHidden();
+                    pane.curFolder = null;
+                }
+                if (pane.curContent != null) {
+                    pane.curContent.setVisible(false);
+                    ((GridData) pane.curContent.getLayoutData()).exclude = true;
+                    pane.curContent = null;
+                }
+            } else {
+                int selectionIndex = 0;
+                for (int index = 0; index < visibleFolders.length; index++) {
+                    if (visibleFolders[index].getContents() == pane.curFolder) {
+                        selectionIndex = index;
+                        break;
+                    }
+                }
+                pane.folderList.select(selectionIndex, false);
+            }
+        }
+        reLayout();
+    }
+
     @Nullable
     public TabbedFolderInfo[] getFolders() {
         return folders;
@@ -389,6 +411,9 @@ public class TabbedFolderComposite extends ConComposite implements ITabbedFolder
 
     private ITabbedFolder getActiveFolder(FolderPane folderPane, boolean activate) {
         TabbedFolderList folderList = folderPane.folderList;
+        if (folderList.getNumberOfElements() == 0) {
+            return null;
+        }
         int selectionIndex = folderList.getSelectionIndex();
         if (selectionIndex < 0) {
             if (!activate) {

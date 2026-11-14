@@ -17,11 +17,14 @@
 
 package org.jkiss.dbeaver.ui.controls;
 
+import org.eclipse.core.runtime.Adapters;
 import org.eclipse.jface.fieldassist.ComboContentAdapter;
 import org.eclipse.jface.layout.GridDataFactory;
+import org.eclipse.jface.text.hyperlink.IHyperlink;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.*;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.layout.RowLayout;
@@ -149,7 +152,7 @@ public class CustomFormEditor {
                     prop,
                     propertyValue,
                     !editable);
-                String propDescription = prop.getDescription();
+                String propDescription = getPropertyToolTipText(prop);
                 if (!CommonUtils.isEmpty(propDescription)) {
                     editControl.setToolTipText(propDescription);
                 }
@@ -174,12 +177,8 @@ public class CustomFormEditor {
                 if (editable) {
                     if (editControl instanceof Combo combo) {
                         if ((editControl.getStyle() & SWT.READ_ONLY) == SWT.READ_ONLY) {
-                            combo.addSelectionListener(new SelectionAdapter() {
-                                @Override
-                                public void widgetSelected(SelectionEvent e) {
-                                    updatePropertyValue(prop, combo.getText());
-                                }
-                            });
+                            combo.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                                updatePropertyValue(prop, combo.getText())));
                         } else {
                             combo.addModifyListener(e -> {
                                 try {
@@ -194,18 +193,19 @@ public class CustomFormEditor {
                     } else if (editControl instanceof StyledText text) {
                         text.addModifyListener(e -> updatePropertyValue(prop, text.getText()));
                     } else if (editControl instanceof Button button) {
-                        button.addSelectionListener(new SelectionAdapter() {
-                            @Override
-                            public void widgetSelected(SelectionEvent e) {
-                                updatePropertyValue(prop, button.getSelection());
-                            }
-                        });
+                        button.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                            updatePropertyValue(prop, button.getSelection())));
                     }
                 }
             }
         } finally {
             isLoading = false;
         }
+    }
+
+    @Nullable
+    protected String getPropertyToolTipText(@NotNull DBPPropertyDescriptor property) {
+        return property.getDescription();
     }
 
     private void updatePropertyValue(@NotNull DBPPropertyDescriptor prop, @Nullable Object value) {
@@ -318,7 +318,8 @@ public class CustomFormEditor {
 
         }
 
-        if (DBSObject.class.isAssignableFrom(propType) || isLinkProperty(property)) {
+        if (DBSObject.class.isAssignableFrom(propType) || isLinkProperty(property)
+            || value != null && Adapters.adapt(value, IHyperlink.class) != null) {
             Label label = UIUtils.createControlLabel(
                 parent,
                 propertyDisplayName
@@ -327,7 +328,15 @@ public class CustomFormEditor {
             Link link = new Link(parent, SWT.NONE);
             link.setText(getLinkTitle(value));
             link.setData(value);
-            link.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> openObjectLink(link.getData())));
+            link.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
+                Object linkData = link.getData();
+                IHyperlink hyperlink = linkData == null ? null : Adapters.adapt(linkData, IHyperlink.class);
+                if (hyperlink != null) {
+                    hyperlink.open();
+                } else {
+                    openObjectLink(linkData);
+                }
+            }));
             link.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             return link;
         } else if (isTextPropertyType(propType)) {
@@ -400,7 +409,7 @@ public class CustomFormEditor {
                 CommonUtils.toBoolean(value),
                 1
             );
-            CSSUtils.setWidgetDefaultBackGround(editor);
+            editor.setBackground(CSSUtils.getCurrentEditorConnectionColor(editor));
             Label label = UIUtils.createLabel(bPH, propertyDisplayName);
             CSSUtils.setWidgetDefaultBackGround(label);
             label.addMouseListener(new MouseAdapter() {

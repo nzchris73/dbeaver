@@ -28,7 +28,6 @@ import org.jkiss.dbeaver.model.ai.internal.AIMessages;
 import org.jkiss.dbeaver.model.ai.qm.AIChatStorage;
 import org.jkiss.dbeaver.model.ai.qm.QMAIChatStorageInMemory;
 import org.jkiss.dbeaver.model.ai.registry.AIEngineDescriptor;
-import org.jkiss.dbeaver.model.ai.registry.AIEngineRegistry;
 import org.jkiss.dbeaver.model.ai.registry.AISettingsManager;
 import org.jkiss.dbeaver.model.ai.registry.AIToolboxRegistry;
 import org.jkiss.dbeaver.model.ai.utils.AIUtils;
@@ -90,26 +89,27 @@ public class AIAssistantImpl implements AIAssistant {
     @Override
     public AIAssistantResponse generateText(
         @NotNull DBRProgressMonitor monitor,
+        @NotNull AIConfigurationProfile profile,
         @NotNull AIFunctionContext functionContext,
         @NotNull List<AIMessage> messages
     ) throws DBException {
         checkAiEnablement();
 
-        AIEngineDescriptor engineDescriptor = getEngineDescriptor();
-        try (AIEngine<?> engine = engineDescriptor.createEngineInstance()) {
+        AIEngineDescriptor engineDescriptor = profile.getEngineDescriptor();
+        try (AIEngine<?> engine = engineDescriptor.createEngineInstance(profile)) {
             AIEngineRequest completionRequest = buildAiEngineRequest(
                 monitor,
+                profile,
                 functionContext,
                 messages,
-                engine,
-                engineDescriptor
+                engine
             );
 
             AIEngineRequest request = completionRequest;
 
             for (int tryIndex = 0; tryIndex < MAX_FUNCTION_CALLS; tryIndex++) {
                 Instant now = Instant.now();
-                AIEngineResponse completionResponse = requestCompletion(engine, monitor, request);
+                AIEngineResponse completionResponse = requestCompletion(engine, profile, monitor, request);
                 int systemPromptLength = AIPromptUtils.calcSystemPromptLength(completionRequest.getMessages());
                 AIUsage usage = completionResponse.getUsage() != null ?
                     completionResponse.getUsage() :
@@ -118,33 +118,37 @@ public class AIAssistantImpl implements AIAssistant {
                 AIMessageMeta requestMeta = new AIMessageMeta(
                     AIMetaTypes.PROMPT,
                     engineDescriptor.getId(),
-                    engine.getProperties().getModel(),
+                    engine.getProperties().getModelDisplayName(),
                     usage,
                     Duration.between(now, Instant.now()),
                     systemPromptLength
                 );
 
                 if (completionResponse.getType() == AIMessageType.FUNCTION) {
-                    AIFunctionCall functionCall = completionResponse.getFunctionCall();
-                    if (functionCall != null) {
+                    List<AIMessage> newMessages = new ArrayList<>(request.getMessages());
+                    List<String> actionResults = new ArrayList<>();
+                    List<AIFunctionCall> calls = completionResponse.getFunctionCalls();
+                    for (AIFunctionCall functionCall : calls) {
                         AIFunctionResult result = callFunction(functionContext, functionCall);
-                        String stringValue = CommonUtils.toString(result.getValue());
                         if (result.getType() == AIFunctionType.ACTION) {
-                            return new AIAssistantResponse(
-                                AIAssistantResponse.Type.FUNCTION,
-                                stringValue,
-                                List.of(requestMeta)
-                            );
+                            actionResults.add(CommonUtils.toString(result.getValue()));
                         } else {
-                            List<AIMessage> newMessages = new ArrayList<>(request.getMessages());
                             AIMessage fcMessage = AIMessage.functionCall(functionCall, result);
                             newMessages.add(fcMessage);
-                            AIEngineRequest newRequest = new AIEngineRequest(newMessages);
-                            newRequest.setFunctions(request.getFunctions());
-
-                            request = newRequest;
-                            continue;
                         }
+                    }
+                    if (!actionResults.isEmpty()) {
+                        return new AIAssistantResponse(
+                            AIAssistantResponse.Type.FUNCTION,
+                            String.join("\n", actionResults),
+                            List.of(requestMeta)
+                        );
+                    }
+                    if (!completionResponse.getFunctionCalls().isEmpty()) {
+                        AIEngineRequest newRequest = new AIEngineRequest(newMessages);
+                        newRequest.setFunctions(request.getFunctions());
+                        request = newRequest;
+                        continue;
                     }
                 } else {
                     List<String> variants = completionResponse.getVariants();
@@ -176,11 +180,15 @@ public class AIAssistantImpl implements AIAssistant {
         @NotNull AIChatResponseConsumer chatListener
     ) throws DBException {
         checkAiEnablement();
+        AIConfigurationProfile configurationProfile = conversation.getProfile();
+        if (configurationProfile == null) {
+            configurationProfile = AISettingsManager.getStaticSettings().getDefaultConfiguration();
+        }
         CompletableFuture<AIChatConversation> future = conversation.startConversation();
 
         try {
-            AIEngineDescriptor engineDescriptor = getEngineDescriptor();
-            AIEngine<?> engine = engineDescriptor.createEngineInstance();
+            AIEngineDescriptor engineDescriptor = configurationProfile.getEngineDescriptor();
+            AIEngine<?> engine = engineDescriptor.createEngineInstance(configurationProfile);
             AIFunctionContext functionContext = new AIFunctionContext(
                 monitor,
                 request.context(),
@@ -217,11 +225,11 @@ public class AIAssistantImpl implements AIAssistant {
                 // When request finishes we process all function calls in response consumer
                 executeEngineStreamRequest(
                     monitor,
+                    configurationProfile,
                     functionContext,
-                    curMessages,
-                    engineResponseConsumer,
                     engine,
-                    engineDescriptor
+                    curMessages,
+                    engineResponseConsumer
                 );
             }
 
@@ -237,23 +245,24 @@ public class AIAssistantImpl implements AIAssistant {
 
     private void executeEngineStreamRequest(
         @NotNull DBRProgressMonitor monitor,
+        @NotNull AIConfigurationProfile profile,
         @NotNull AIFunctionContext functionContext,
-        @NotNull List<AIMessage> messages,
-        @NotNull AIEngineResponseConsumer listener,
         @NotNull AIEngine<?> engine,
-        @NotNull AIEngineDescriptor engineDescriptor
+        @NotNull List<AIMessage> messages,
+        @NotNull AIEngineResponseConsumer listener
     ) throws DBException {
         AIEngineRequest request = getRequestFactory().build(
             monitor,
             this,
+            profile,
             engine,
-            engineDescriptor,
             functionContext,
             messages
         );
 
         if (isLoggingEnabled()) {
-            log.debug("AI chat request:\n" + CommonUtils.addTextIndent(request.getMessages().toString(), LOG_INDENT));
+            log.debug("AI chat request (" + getEngineInfo(profile, engine) + "):\n"
+                + CommonUtils.addTextIndent(request.getMessages().toString(), LOG_INDENT));
             log.debug("AI chat request functions: " + request.getFunctions().stream().map(AIFunctionDescriptor::getId).toList());
 
             AIDatabaseContext context = functionContext.getContext();
@@ -273,8 +282,10 @@ public class AIAssistantImpl implements AIAssistant {
         callWithRetry(listener, () -> {
             if (isTruncated.get()) {
                 isTruncated.set(false);
-                listener.warning(
-                    "Context description was truncated");
+                listener.warning(AIUtils.getSettingsAccessMessage(
+                    AIMessages.ai_warning_chat_history_truncated,
+                    AIMessages.ai_warning_chat_history_truncated_linked,
+                    AIMessages.ai_warning_chat_history_truncated_admin));
             }
             int systemPromptLength = AIPromptUtils.calcSystemPromptLength(request.getMessages());
             listener.systemPromptLength(systemPromptLength);
@@ -282,9 +293,12 @@ public class AIAssistantImpl implements AIAssistant {
                 engine.requestCompletionStream(monitor, request, listener);
             } else {
                 AIEngineResponse response = engine.requestCompletion(monitor, request);
+                listener.messageMetadata(response.getMessageMetadata());
 
-                if (response.getFunctionCall() != null) {
-                    listener.nextChunk(new AIEngineResponseChunk(response.getFunctionCall()));
+                if (!response.getFunctionCalls().isEmpty()) {
+                    for (AIFunctionCall functionCall : response.getFunctionCalls()) {
+                        listener.nextChunk(new AIEngineResponseChunk(functionCall));
+                    }
                     listener.usage(response.getUsage());
                     listener.completeBlock();
                 } else if (response.getVariants() != null) {
@@ -326,7 +340,7 @@ public class AIAssistantImpl implements AIAssistant {
                     chatListener.error(
                         new DBException(
                             "Too many AI function calls (" + AIAssistantImpl.MAX_FUNCTION_CALLS + ")"));
-                    chatListener.complete(List.of(), true);
+                    chatListener.complete(List.of(), true, false);
                     return;
                 }
                 fc.transformArguments(context, functionContext);
@@ -344,20 +358,29 @@ public class AIAssistantImpl implements AIAssistant {
                     AIMessage fcMessage = AIMessage.functionCall(fc, result);
                     // Visualize result in chat
                     chatListener.processFunctionCall(fcMessage);
-                    if (function.getType() == AIFunctionType.INFORMATION || result.getException() != null) {
+                    if (result.getException() != null) {
+                        chatListener.error(result.getException());
+                        chatListener.complete(List.of(), true, false);
+                        return;
+                    }
+                    if (function.getType() == AIFunctionType.INFORMATION) {
                         newMessages.add(fcMessage);
                     }
                 } catch (Exception e) {
                     chatListener.error(e);
-                    conversation.promptProcessed(true);
+                    chatListener.complete(List.of(), true, false);
                     return;
                 }
+            }
+            if (!conversation.isActive()) {
+                return;
             }
             if (!newMessages.equals(messages)) {
                 try {
                     generateTextStream(monitor, chatSession, conversation, new AIChatRequest(context, newMessages, null), chatListener);
                 } catch (Exception e) {
                     chatListener.error(e);
+                    chatListener.complete(List.of(), true, false);
                 }
             } else {
                 // No more messages for AI
@@ -367,14 +390,14 @@ public class AIAssistantImpl implements AIAssistant {
     }
 
     @Override
-    public boolean isFunctionSupported() {
+    public boolean isFunctionSupported(@NotNull AIConfigurationProfile profile) {
         AIToolboxManager toolboxManager = this.getToolboxManager();
         AIFunctionSettings functionSettings = toolboxManager.getFunctionSettings();
         if (!functionSettings.isFunctionsEnabled()) {
             return false;
         }
         try {
-            AIEngineDescriptor engineDescriptor = getEngineDescriptor();
+            AIEngineDescriptor engineDescriptor = profile.getEngineDescriptor();
             return engineDescriptor.isSupportsFunctions();
         } catch (DBException e) {
             log.debug(e);
@@ -406,32 +429,18 @@ public class AIAssistantImpl implements AIAssistant {
     @NotNull
     public AIEngineRequest buildAiEngineRequest(
         @NotNull DBRProgressMonitor monitor,
+        @NotNull AIConfigurationProfile profile,
         @NotNull AIFunctionContext functionContext,
         @NotNull List<AIMessage> messages,
-        @NotNull AIEngine<?> engine,
-        @NotNull AIEngineDescriptor engineDescriptor
+        @NotNull AIEngine<?> engine
     ) throws DBException {
         return getRequestFactory().build(
             monitor,
             this,
+            profile,
             engine,
-            engineDescriptor,
             functionContext,
             messages
-        );
-    }
-
-    @NotNull
-    private static AIFunctionContext createAiFunctionContext(
-        @NotNull DBRProgressMonitor monitor,
-        @Nullable AIDatabaseContext context,
-        @NotNull AIPromptGenerator systemGenerator,
-        @NotNull List<AIMessage> messages
-    ) {
-        return new AIFunctionContext(
-            monitor,
-            context,
-            systemGenerator
         );
     }
 
@@ -454,12 +463,22 @@ public class AIAssistantImpl implements AIAssistant {
         if (function == null) {
             throw new DBCMessageException("Function '" + functionName + "' not found");
         }
+        AIFunctionSettings settings = getToolboxManager().getFunctionSettings();
+        AIToolbox toolbox = function.getToolbox();
+        if (!settings.isFunctionsEnabled() || !toolbox.isEnabled() || !toolbox.isAccessible()
+            || !settings.getToolboxSettings(toolbox).isEnabled()
+            || !settings.getToolboxSettings(toolbox).isFunctionEnabled(function)) {
+            throw new DBCMessageException("Function '" + functionName + "' is disabled");
+        }
         Map<String, Object> arguments = functionCall.getArguments();
-        log.debug("Call AI function " + function.getId() + "(" +
-            arguments.entrySet().stream()
-                .map(e -> e.getKey() + "=" + e.getValue())
-                .collect(Collectors.joining(",")) +
-            ")");
+
+        if (isLoggingEnabled()) {
+            log.debug("Call AI function " + function.getId() + "(" +
+                arguments.entrySet().stream()
+                    .map(e -> e.getKey() + "=" + e.getValue())
+                    .collect(Collectors.joining(",")) +
+                ")");
+        }
         DBPDataSourceContainer container = context.getContext() != null
             ? context.getContext().getExecutionContext().getDataSource().getContainer() : null;
         AIBaseFeatures.AI_CHAT_FUNCTION_CALL.use(AIBaseFeatures.buildFeatureParameters(
@@ -485,51 +504,30 @@ public class AIAssistantImpl implements AIAssistant {
     }
 
     protected void checkAiEnablement() throws DBException {
-        if (AISettingsManager.getInstance().getSettings().isAiDisabled()) {
+        AISettings aiSettings = AISettingsManager.getInstance().getSettings();
+        if (aiSettings.isAiDisabled()) {
             throw new DBException("AI integration is disabled");
         }
-    }
-
-    public static String getActiveEngineId() {
-        return AISettingsManager.getInstance().getSettings().activeEngine();
-    }
-
-    public boolean isEngineSupports(Class<?> api) {
-        return AIEngineRegistry.getInstance().isEngineSupports(
-            getActiveEngineId(),
-            api);
+        aiSettings.resolveSecrets();
     }
 
     @NotNull
-    public AIEngine<?> createEngine() throws DBException {
-        return AIEngineRegistry.getInstance().createEngine(getActiveEngineId());
-    }
-
-    @NotNull
-    public AIEngineDescriptor getEngineDescriptor() throws DBException {
-        AIEngineDescriptor descriptor = AIEngineRegistry.getInstance().getEngineDescriptor(getActiveEngineId());
-        if (descriptor == null) {
-            log.trace("Active engine is not present in the configuration, switching to default active engine");
-            AIEngineDescriptor defaultCompletionEngineDescriptor =
-                AIEngineRegistry.getInstance().getDefaultCompletionEngineDescriptor();
-            if (defaultCompletionEngineDescriptor == null) {
-                throw new DBException("AI engine  not found");
-            }
-            descriptor = defaultCompletionEngineDescriptor;
-        }
-        return descriptor;
+    public AIEngine<?> createEngine(@NotNull AIConfigurationProfile profile) throws DBException {
+        return profile.getEngineDescriptor().createEngineInstance(profile);
     }
 
     @NotNull
     protected AIEngineResponse requestCompletion(
         @NotNull AIEngine<?> engine,
+        @NotNull AIConfigurationProfile profile,
         @NotNull DBRProgressMonitor monitor,
         @NotNull AIEngineRequest request
     ) throws DBException {
         try {
             boolean loggingEnabled = isLoggingEnabled();
             if (loggingEnabled) {
-                log.debug("AI request:\n" + CommonUtils.addTextIndent(request.getMessages().toString(), LOG_INDENT));
+                log.debug("AI request (" + getEngineInfo(profile, engine) + "):\n"
+                    + CommonUtils.addTextIndent(request.getMessages().toString(), LOG_INDENT));
             }
 
             AIEngineResponse completionResponse = callWithRetry(() -> engine.requestCompletion(monitor, request));
@@ -546,6 +544,13 @@ public class AIAssistantImpl implements AIAssistant {
                 throw new DBException("Error requesting completion", e);
             }
         }
+    }
+
+    @NotNull
+    protected static String getEngineInfo(@NotNull AIConfigurationProfile profile, @NotNull AIEngine<?> engine) {
+        return "profile: " + profile.getProfileName()
+            + ", engine: " + profile.getEngineId()
+            + ", model: " + engine.getProperties().getModelDisplayName();
     }
 
     protected boolean isLoggingEnabled() {
@@ -566,12 +571,12 @@ public class AIAssistantImpl implements AIAssistant {
     @Nullable
     private AIEngineProperties getActiveEngineConfiguration() throws DBException {
         AISettingsManager settingsManager = AISettingsManager.getInstance();
-        String activeEngine = settingsManager.getSettings().activeEngine();
-        if (activeEngine == null || activeEngine.isEmpty()) {
+        AIConfigurationProfile profile = settingsManager.getSettings().getDefaultConfigurationOrNull();
+        if (profile == null) {
             log.warn("No active AI engine configured");
             return null;
         }
-        return settingsManager.getSettings().getEngineConfiguration(activeEngine);
+        return profile.getConfiguration();
     }
 
     protected static <T> T callWithRetry(ThrowableSupplier<T, DBException> supplier) throws DBException {

@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ import org.jkiss.dbeaver.ui.editors.sql.dialogs.GenerateSQLParametrizedDialog;
 import org.jkiss.dbeaver.ui.editors.sql.dialogs.ViewSQLDialog;
 import org.jkiss.dbeaver.ui.editors.sql.handlers.SQLEditorHandlerOpenEditor;
 import org.jkiss.dbeaver.ui.editors.sql.handlers.SQLNavigatorContext;
-import org.jkiss.dbeaver.ui.internal.UIMessages;
+import org.jkiss.dbeaver.ui.editors.sql.internal.SQLEditorMessages;
 import org.jkiss.dbeaver.utils.GeneralUtils;
 import org.jkiss.utils.CommonUtils;
 
@@ -172,7 +172,7 @@ public class UIServiceSQLImpl implements UIServiceSQL {
             }
 
             @Override
-            public void createPartControl(Composite parent) {
+            public void createPartControl(@NotNull Composite parent) {
                 super.createPartControl(parent);
                 getAction(ITextEditorActionConstants.CONTEXT_PREFERENCES).setEnabled(false);
             }
@@ -290,13 +290,13 @@ public class UIServiceSQLImpl implements UIServiceSQL {
                 buttonBar.setLayout(new GridLayout(3, false));
                 Button showQueryButton = UIUtils.createPushButton(
                     buttonBar,
-                    UIMessages.dialog_confirm_action_show_query,
+                    SQLEditorMessages.dialog_confirm_action_show_query,
                     null
                 );
                 showQueryButton.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
                     openSQLViewer(
                         contextProvider.getExecutionContext(),
-                        UIMessages.dialog_confirm_action_query,
+                        SQLEditorMessages.dialog_confirm_action_query,
                         null,
                         queryText,
                         false,

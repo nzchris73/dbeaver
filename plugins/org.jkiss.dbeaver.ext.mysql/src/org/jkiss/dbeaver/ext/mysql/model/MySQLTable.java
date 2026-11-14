@@ -223,7 +223,7 @@ public class MySQLTable extends MySQLTableBase
                     continue;
                 }
                 MySQLTableIndex index = new MySQLTableIndex(monitor, this, srcIndex);
-                this.getContainer().indexCache.cacheObject(index);
+                this.getContainer().getIndexCache().cacheObject(index);
             }
         }
 
@@ -288,13 +288,12 @@ public class MySQLTable extends MySQLTableBase
         return additionalInfo.partitioned;
     }
 
+    @NotNull
     @Override
     @Association
     public Collection<MySQLTableIndex> getIndexes(@NotNull DBRProgressMonitor monitor)
-        throws DBException
-    {
-        // Read indexes using cache
-        return this.getContainer().indexCache.getObjects(monitor, getContainer(), this);
+            throws DBException {
+        return getContainer().getIndexes(monitor, this);
     }
 
     @NotNull
@@ -315,17 +314,20 @@ public class MySQLTable extends MySQLTableBase
     public Collection<MySQLTableConstraint> getConstraints(@NotNull DBRProgressMonitor monitor)
         throws DBException
     {
-        List<MySQLTableConstraint> constraintObjects = getContainer().uniqueKeyCache.getObjects(monitor, getContainer(), this);
+        List<MySQLTableConstraint> constraintObjects = new ArrayList<>();
+
+        List<MySQLTableConstraint> uniqueKeyConstraints = getContainer().uniqueKeyCache.getObjects(monitor, getContainer(), this);
+        if (uniqueKeyConstraints != null) {
+            constraintObjects.addAll(uniqueKeyConstraints);
+        }
+
         if (getDataSource().supportsCheckConstraints()) {
             List<MySQLTableConstraint> checkConstraintObjects = getContainer().checkConstraintCache.getObjects(monitor, getContainer(), this);
             if (!CommonUtils.isEmpty(checkConstraintObjects)) {
                 constraintObjects.addAll(checkConstraintObjects);
             }
-            return constraintObjects;
         }
-        else {
-            return constraintObjects;
-        }
+        return constraintObjects;
     }
 
     public MySQLTableConstraint getUniqueKey(DBRProgressMonitor monitor, String ukName)
@@ -799,7 +801,7 @@ public class MySQLTable extends MySQLTableBase
         if (getDataSource().supportsCheckConstraints()) {
             getContainer().checkConstraintCache.clearObjectCache(this);
         }
-        getContainer().indexCache.clearObjectCache(this);
+        getContainer().getIndexCache().clearObjectCache(this);
         getContainer().triggerCache.clearChildrenOf(this);
         getContainer().resetStatistics();
         this.referenceCache = null;

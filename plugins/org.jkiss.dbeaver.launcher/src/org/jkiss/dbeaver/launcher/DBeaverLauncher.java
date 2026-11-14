@@ -27,16 +27,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
 import java.security.CodeSource;
 import java.security.KeyStore;
 import java.security.ProtectionDomain;
 import java.security.Security;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -58,6 +55,7 @@ import javax.swing.*;
  * org.eclipse.core.runtime.adaptor.EclipseStarter. The fields and methods
  * on this class are not API.
  */
+@SuppressWarnings("CheckStyle")
 public class DBeaverLauncher {
 
     public static final String PROP_ECLIPSE_NET_PROXY_ENABLE = "org.eclipse.net.core.enableProxyService";
@@ -120,7 +118,7 @@ public class DBeaverLauncher {
 
     private String vm = null;
     private String[] vmargs = null;
-    private String[] commands = null;
+    private String[] commands = new String[0];
     String[] extensionPaths = null;
 
     JNIBridge bridge = null;
@@ -207,6 +205,7 @@ public class DBeaverLauncher {
     private static final String PROP_INSTALL_AREA = "osgi.install.area"; //$NON-NLS-1$
     private static final String PROP_CONFIG_AREA = "osgi.configuration.area"; //$NON-NLS-1$
     private static final String PROP_CONFIG_AREA_DEFAULT = "osgi.configuration.area.default"; //$NON-NLS-1$
+    private static final String PROP_INSTANCE_AREA_DEFAULT = "osgi.instance.area.default"; //$NON-NLS-1$
     private static final String PROP_BASE_CONFIG_AREA = "osgi.baseConfiguration.area"; //$NON-NLS-1$
     private static final String PROP_SHARED_CONFIG_AREA = "osgi.sharedConfiguration.area"; //$NON-NLS-1$
     private static final String PROP_CONFIG_CASCADED = "osgi.configuration.cascaded"; //$NON-NLS-1$
@@ -218,7 +217,6 @@ public class DBeaverLauncher {
     private static final String PROP_FRAMEWORK_SYSPATH = "osgi.syspath"; //$NON-NLS-1$
     private static final String PROP_FRAMEWORK_SHAPE = "osgi.framework.shape"; //$NON-NLS-1$
     private static final String PROP_LOGFILE = "osgi.logfile"; //$NON-NLS-1$
-    private static final String PROP_REQUIRED_JAVA_VERSION = "osgi.requiredJavaVersion"; //$NON-NLS-1$
     private static final String PROP_PARENT_CLASSLOADER = "osgi.parentClassloader"; //$NON-NLS-1$
     private static final String PROP_FRAMEWORK_PARENT_CLASSLOADER = "osgi.frameworkParentClassloader"; //$NON-NLS-1$
     private static final String PROP_NL = "osgi.nl"; //$NON-NLS-1$
@@ -260,7 +258,6 @@ public class DBeaverLauncher {
     // types of parent classloaders the framework can have
     private static final String PARENT_CLASSLOADER_APP = "app"; //$NON-NLS-1$
     private static final String PARENT_CLASSLOADER_EXT = "ext"; //$NON-NLS-1$
-    private static final String PARENT_CLASSLOADER_BOOT = "boot"; //$NON-NLS-1$
     private static final String PARENT_CLASSLOADER_CURRENT = "current"; //$NON-NLS-1$
 
     // log file handling
@@ -304,65 +301,6 @@ public class DBeaverLauncher {
         "Windows 8",
         "Windows Server 2012"
     );
-
-    /**
-     * A structured form for a version identifier.
-     *
-     * @see "http://www.oracle.com/technetwork/java/javase/versioning-naming-139433.html for information on valid version strings"
-     * @see "http://openjdk.java.net/jeps/223 for information on the JavaSE-9 version JEP 223"
-     */
-    static class Identifier {
-        private static final String DELIM = ". _-"; //$NON-NLS-1$
-        private int major, minor, service;
-
-        /**
-         * @throws NumberFormatException if cannot parse the major and minor version components
-         */
-        Identifier(String versionString) {
-            super();
-            StringTokenizer tokenizer = new StringTokenizer(versionString, DELIM);
-
-            // major
-            if (tokenizer.hasMoreTokens())
-                major = Integer.parseInt(tokenizer.nextToken());
-
-            try {
-                // minor
-                if (tokenizer.hasMoreTokens())
-                    minor = Integer.parseInt(tokenizer.nextToken());
-
-                // service
-                if (tokenizer.hasMoreTokens())
-                    service = Integer.parseInt(tokenizer.nextToken());
-            } catch (NumberFormatException nfe) {
-                // ignore the minor and service qualifiers in that case and default to 0
-                // this will allow us to tolerate other non-conventional version numbers
-            }
-        }
-
-        /**
-         * Returns true if this id is considered to be greater than or equal to the given baseline.
-         * e.g.
-         * 1.2.9 >= 1.3.1 -> false
-         * 1.3.0 >= 1.3.1 -> false
-         * 1.3.1 >= 1.3.1 -> true
-         * 1.3.2 >= 1.3.1 -> true
-         * 2.0.0 >= 1.3.1 -> true
-         */
-        boolean isGreaterEqualTo(Identifier minimum) {
-            if (major < minimum.major)
-                return false;
-            if (major > minimum.major)
-                return true;
-            // major numbers are equivalent so check minor
-            if (minor < minimum.minor)
-                return false;
-            if (minor > minimum.minor)
-                return true;
-            // minor numbers are equivalent so check service
-            return service >= minimum.service;
-        }
-    }
 
     /**
      * Searches for the product ID in the provided array of command-line arguments.
@@ -582,7 +520,7 @@ public class DBeaverLauncher {
             if (urls != null && urls.length > 0) {
                 //the last one is most interesting
                 for (int i = urls.length - 1; i >= 0 && libPath == null; i--) {
-                    File entryFile = new File(urls[i].getFile());
+                    File entryFile = LauncherUtils.toFile(urls[i]);
                     String dir = entryFile.getParent();
                     if (inDevelopmentMode) {
                         String devDir = dir + "/" + PLUGIN_ID + "/fragments"; //$NON-NLS-1$ //$NON-NLS-2$
@@ -597,7 +535,7 @@ public class DBeaverLauncher {
         }
         if (libPath == null) {
             URL install = getInstallLocation();
-            String location = install.getFile();
+            String location = LauncherUtils.toFile(install).getPath();
             location += "/plugins/"; //$NON-NLS-1$
             fragment = searchFor(fragmentName, location);
             if (fragment != null)
@@ -611,39 +549,7 @@ public class DBeaverLauncher {
             fragment = fragment.substring(5);
 
         File frag = new File(fragment);
-        if (!frag.exists())
-            return null;
-
-        if (frag.isDirectory())
-            return searchFor("eclipse", fragment); //$NON-NLS-1$;
-
-        try (ZipFile fragmentJar = new ZipFile(frag)) {
-            Enumeration<? extends ZipEntry> entries = fragmentJar.entries();
-            String entry = null;
-            while (entries.hasMoreElements()) {
-                ZipEntry zipEntry = entries.nextElement();
-                if (zipEntry.getName().startsWith("eclipse_")) { //$NON-NLS-1$
-                    entry = zipEntry.getName();
-                    break;
-                }
-            }
-            if (entry != null) {
-                String lib = extractFromJAR(fragment, entry);
-                if (!getOS().equals("win32")) { //$NON-NLS-1$
-                    try {
-                        Runtime.getRuntime().exec(new String[]{"chmod", "755", lib}).waitFor(); //$NON-NLS-1$ //$NON-NLS-2$
-                    } catch (Throwable e) {
-                        //ignore
-                    }
-                }
-                return lib;
-            }
-        } catch (IOException e) {
-            log("Exception opening JAR file: " + fragment); //$NON-NLS-1$
-            log(e);
-            return null;
-        }
-        return null;
+        return frag.isDirectory() ? searchFor("eclipse", fragment) : null; //$NON-NLS-1$
     }
 
     /**
@@ -670,6 +576,12 @@ public class DBeaverLauncher {
         processConfiguration();
         processGlobalConfiguration();
         Path dbeaverDataDir = getDataDirectory();
+        if (System.getProperty(PROP_INSTANCE_AREA_DEFAULT) == null && !Arrays.asList(passThruArgs).contains(ARG_DATA)) {
+            Path defaultWorkspace = detectDefaultWorkspaceLocation(passThruArgs, dbeaverDataDir);
+            if (defaultWorkspace.isAbsolute()) {
+                System.setProperty(PROP_INSTANCE_AREA_DEFAULT, defaultWorkspace.toUri().toString());
+            }
+        }
         try {
             CommandLineExecuteResult commandLineExecuteResult = processCommandLineAsClient(passThruArgs, dbeaverDataDir);
             if (commandLineExecuteResult.shutdown()) {
@@ -707,11 +619,6 @@ public class DBeaverLauncher {
         //Set up the JNI bridge.  We need to know the install location to find the shared library
         setupJNI(bootPath);
 
-        //ensure minimum Java version, do this after JNI is set up so that we can write an error message
-        //with exitdata if we fail.
-        if (!checkVersion(System.getProperty("java.version"), System.getProperty(PROP_REQUIRED_JAVA_VERSION))) //$NON-NLS-1$
-            return;
-
         // verify configuration location is writable
         // FIXME: disable this check for products which run in read-only environment, e.g. cloud based
         //if (!checkConfigurationLocation(configurationLocation))
@@ -722,9 +629,8 @@ public class DBeaverLauncher {
             System.out.println("Has application parameters: " + hasAppParams);
         }
         if (!hasAppParams) {
-            // splash handling is done here, because the default case needs to know
-            // the location of the boot plugin we are going to use
-            handleSplash(bootPath);
+            // Resolve the splash image before invoking the framework.
+            handleSplash();
         } else {
             boolean addNoSplash = true;
             for (String arg : passThruArgs) {
@@ -1085,22 +991,7 @@ public class DBeaverLauncher {
     }
 
     private void invokeFramework(String[] passThruArgs, URL[] bootPath) throws Error, Exception {
-        String type = PARENT_CLASSLOADER_BOOT;
-        try {
-            String javaVersion = System.getProperty("java.version"); //$NON-NLS-1$
-            if (javaVersion != null && new Identifier(javaVersion).isGreaterEqualTo(new Identifier("1.9"))) { //$NON-NLS-1$
-                // Workaround for bug 466683. Some org.w3c.dom.* packages that used to be available from
-                // JavaSE's boot classpath are only available from the extension path in Java 9 b62.
-                // Workaround for bug 489958. javax.annotation.* types are only available from
-                // JavaSE-9's extension path in Java 9-ea+108. The identifier "1.9" could be changed to "9", but "1.9" works just as well.
-                type = PARENT_CLASSLOADER_EXT;
-            }
-        } catch (SecurityException | NumberFormatException e) {
-            // If the security manager won't allow us to get the system property, continue for
-            // now and let things fail later on their own if necessary.
-            // If the version string was in a format that we don't understand, continue and
-            // let things fail later on their own if necessary.
-        }
+        String type = PARENT_CLASSLOADER_EXT;
         type = System.getProperty(PROP_PARENT_CLASSLOADER, type);
         type = System.getProperty(PROP_FRAMEWORK_PARENT_CLASSLOADER, type);
         ClassLoader parent = null;
@@ -1130,35 +1021,6 @@ public class DBeaverLauncher {
     }
 
     /**
-     * Checks whether the given available version is greater or equal to the
-     * given required version.
-     * <p>Will set PROP_EXITCODE/PROP_EXITDATA accordingly if check fails.</p>
-     *
-     * @return a boolean indicating whether the checking passed
-     */
-    private boolean checkVersion(String availableVersion, String requiredVersion) {
-        if (requiredVersion == null || availableVersion == null)
-            return true;
-        try {
-            Identifier required = new Identifier(requiredVersion);
-            Identifier available = new Identifier(availableVersion);
-            boolean compatible = available.isGreaterEqualTo(required);
-            if (!compatible) {
-                // any non-zero value should do it - 14 used to be used for version incompatibility in Eclipse 2.1
-                System.setProperty(PROP_EXITCODE, "14"); //$NON-NLS-1$
-                System.setProperty(PROP_EXITDATA, "<title>Incompatible JVM</title>Version " + availableVersion + " of the JVM is not suitable for this product. Version: " + requiredVersion + " or greater is required."); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-            }
-            return compatible;
-        } catch (SecurityException | NumberFormatException e) {
-            // If the security manager won't allow us to get the system property, continue for
-            // now and let things fail later on their own if necessary.
-            // If the version string was in a format that we don't understand, continue and
-            // let things fail later on their own if necessary.
-            return true;
-        }
-    }
-
-    /**
      * Checks whether the given location can be created and is writable.
      * If the system property "osgi.configuration.area.readOnly" is set
      * the check always succeeds.
@@ -1174,7 +1036,7 @@ public class DBeaverLauncher {
             // user wants readonly config area
             return true;
         }
-        File configDir = new File(locationUrl.getFile()).getAbsoluteFile();
+        File configDir = LauncherUtils.toFile(locationUrl).getAbsoluteFile();
         if (!configDir.exists()) {
             configDir.mkdirs();
             if (!configDir.exists()) {
@@ -1272,7 +1134,7 @@ public class DBeaverLauncher {
 
     private void readFrameworkExtensions(URL base, ArrayList<URL> result) throws IOException {
         String[] extensions = getArrayFromList(System.getProperty(PROP_EXTENSIONS));
-        String parent = new File(base.getFile()).getParent();
+        String parent = LauncherUtils.toFile(base).getParent();
         ArrayList<String> extensionResults = new ArrayList<>(extensions.length);
         for (String extension : extensions) {
             //Search the extension relatively to the osgi plugin
@@ -1287,7 +1149,7 @@ public class DBeaverLauncher {
             URL extensionURL;
             if (installLocation.getProtocol().equals("file")) { //$NON-NLS-1$
                 extensionResults.add(path);
-                extensionURL = new File(path).toURL();
+                extensionURL = LauncherUtils.toURL(new File(path));
             } else
                 extensionURL = new URL(installLocation.getProtocol(), installLocation.getHost(), installLocation.getPort(), path);
             //Load a property file of the extension, merge its content, and in case of dev mode add the bin entries
@@ -1339,7 +1201,7 @@ public class DBeaverLauncher {
             baseJarList = System.getProperty(PROP_CLASSPATH);
         }
 
-        File fwkFile = new File(base.getFile());
+        File fwkFile = LauncherUtils.toFile(base);
         boolean fwkIsDirectory = fwkFile.isDirectory();
         //We found where the fwk is, remember it and its shape
         if (fwkIsDirectory) {
@@ -1347,7 +1209,7 @@ public class DBeaverLauncher {
         } else {
             System.setProperty(PROP_FRAMEWORK_SHAPE, "jar");//$NON-NLS-1$
         }
-        String fwkPath = new File(new File(base.getFile()).getParent()).getAbsolutePath();
+        String fwkPath = LauncherUtils.toFile(base).getParentFile().getAbsolutePath();
         if (Character.isUpperCase(fwkPath.charAt(0))) {
             char[] chars = fwkPath.toCharArray();
             chars[0] = Character.toLowerCase(chars[0]);
@@ -1357,7 +1219,7 @@ public class DBeaverLauncher {
 
         String[] baseJars = getArrayFromList(baseJarList);
         if (baseJars.length == 0) {
-            if (!inDevelopmentMode && new File(base.getFile()).isDirectory())
+            if (!inDevelopmentMode && LauncherUtils.toFile(base).isDirectory())
                 throw new IOException("Unable to initialize " + PROP_CLASSPATH); //$NON-NLS-1$
             addEntry(base, result);
             return;
@@ -1373,7 +1235,7 @@ public class DBeaverLauncher {
                 }
                 URL url;
                 if (string.startsWith(FILE_SCHEME))
-                    url = new File(string.substring(5)).toURL();
+                    url = LauncherUtils.toURL(new File(string.substring(5)));
                 else
                     url = new URL(string);
                 addEntry(url, result);
@@ -1384,7 +1246,7 @@ public class DBeaverLauncher {
     }
 
     protected void addEntry(URL url, List<URL> result) {
-        if (new File(url.getFile()).exists())
+        if (LauncherUtils.toFile(url).exists())
             result.add(url);
     }
 
@@ -1399,7 +1261,7 @@ public class DBeaverLauncher {
             File path = new File(location);
             URL url;
             if (path.isAbsolute())
-                url = path.toURL();
+                url = LauncherUtils.toURL(path);
             else {
                 // dev path is relative, combine with base location
                 char lastChar = location.charAt(location.length() - 1);
@@ -1426,12 +1288,12 @@ public class DBeaverLauncher {
         } else {
             // search in the root location
             url = getInstallLocation();
-            String pluginsLocation = new File(url.getFile(), "plugins").toString(); //$NON-NLS-1$
+            String pluginsLocation = new File(LauncherUtils.toFile(url), "plugins").toString(); //$NON-NLS-1$
             String path = searchFor(framework, pluginsLocation);
             if (path == null)
                 throw new FileNotFoundException(String.format("Could not find framework under %s", pluginsLocation)); //$NON-NLS-1$
             if (url.getProtocol().equals("file")) //$NON-NLS-1$
-                url = new File(path).toURL();
+                url = LauncherUtils.toURL(new File(path));
             else
                 url = new URL(url.getProtocol(), url.getHost(), url.getPort(), path);
         }
@@ -1624,8 +1486,8 @@ public class DBeaverLauncher {
                 File toAdjust = LauncherUtils.toFileURL(spec);
                 toAdjust = resolveFile(toAdjust);
                 if (toAdjust.isDirectory())
-                    return LauncherUtils.adjustTrailingSlash(toAdjust.toURL(), trailingSlash);
-                return toAdjust.toURL();
+                    return LauncherUtils.adjustTrailingSlash(LauncherUtils.toURL(toAdjust), trailingSlash);
+                return LauncherUtils.toURL(toAdjust);
             }
             return new URL(spec);
         } catch (MalformedURLException e) {
@@ -1636,8 +1498,8 @@ public class DBeaverLauncher {
             try {
                 File toAdjust = new File(spec);
                 if (toAdjust.isDirectory())
-                    return LauncherUtils.adjustTrailingSlash(toAdjust.toURL(), trailingSlash);
-                return toAdjust.toURL();
+                    return LauncherUtils.adjustTrailingSlash(LauncherUtils.toURL(toAdjust), trailingSlash);
+                return LauncherUtils.toURL(toAdjust);
             } catch (MalformedURLException e1) {
                 return null;
             }
@@ -1654,7 +1516,7 @@ public class DBeaverLauncher {
             String installArea = System.getProperty(PROP_INSTALL_AREA);
             if (installArea != null) {
                 if (installArea.startsWith(FILE_SCHEME))
-                    toAdjust = new File(installArea.substring(5), toAdjust.getPath());
+                    toAdjust = new File(LauncherUtils.toFileURL(installArea), toAdjust.getPath());
                 else if (new File(installArea).exists())
                     toAdjust = new File(installArea, toAdjust.getPath());
             }
@@ -1734,7 +1596,7 @@ public class DBeaverLauncher {
 
         // TODO a little dangerous here.  Basically we have to assume that it is a file URL.
         if (install.getProtocol().equals("file")) { //$NON-NLS-1$
-            File installDir = new File(install.getFile());
+            File installDir = LauncherUtils.toFile(install);
             if (LauncherUtils.canWrite(installDir))
                 return installDir.getAbsolutePath() + File.separator + CONFIG_DIR;
         }
@@ -1758,7 +1620,7 @@ public class DBeaverLauncher {
         URL installURL = getInstallLocation();
         if (installURL == null)
             return null;
-        File installDir = new File(installURL.getFile());
+        File installDir = LauncherUtils.toFile(installURL);
         String installDirHash = getInstallDirHash();
 
         if (protectBase && Constants.OS_MACOSX.equals(os)) {
@@ -1828,7 +1690,7 @@ public class DBeaverLauncher {
         URL installURL = getInstallLocation();
         if (installURL == null)
             return ""; //$NON-NLS-1$
-        File installDir = new File(installURL.getFile());
+        File installDir = LauncherUtils.toFile(installURL);
         int hashCode;
         try {
             hashCode = installDir.getCanonicalPath().hashCode();
@@ -1859,7 +1721,7 @@ public class DBeaverLauncher {
             return properties;
         }
         //java.io used because url may contain spaces and other non escaped chars, and Path.of(URL.toURI()) would fail
-        File eclipseProduct = new File(installURL.getFile(), PRODUCT_SITE_MARKER);
+        File eclipseProduct = new File(LauncherUtils.toFile(installURL), PRODUCT_SITE_MARKER);
         if (debug) {
             System.out.println("Loading product properties from " + eclipseProduct);
         }
@@ -2288,7 +2150,7 @@ public class DBeaverLauncher {
         String base = getWorkingDirectory(DBEAVER_DATA_FOLDER);
         try {
             String productPath = getProductProperties();
-            Path basePath = Paths.get(base, DBEAVER_INSTALL_FOLDER, productPath);
+            Path basePath = Path.of(base, DBEAVER_INSTALL_FOLDER, productPath);
             String productConfigurationLocation = basePath.toFile().getAbsolutePath();
             return buildURL(productConfigurationLocation, true);
         } catch (IOException e) {
@@ -2391,7 +2253,7 @@ public class DBeaverLauncher {
             return null;
         }
 
-        File installDir = new File(installURL.getFile());
+        File installDir = LauncherUtils.toFile(installURL);
         File eclipseProduct = new File(installDir, PRODUCT_SITE_MARKER);
         if (eclipseProduct.exists()) {
             Properties props = new Properties();
@@ -2695,7 +2557,7 @@ public class DBeaverLauncher {
             try {
                 // create a file URL (via File) to normalize the form (e.g., put
                 // the leading / on if necessary)
-                path = new File(path).toURL().getFile();
+                path = LauncherUtils.toURL(new File(path)).getFile();
             } catch (MalformedURLException e1) {
                 // will never happen.  The path is straight from a URL.
             }
@@ -2797,9 +2659,8 @@ public class DBeaverLauncher {
      *
      * The -endsplash argument is longer used and has the same result as -nosplash
      *
-     * @param defaultPath search path for the boot plugin
      */
-    private void handleSplash(URL[] defaultPath) {
+    private void handleSplash() {
         // run without splash if we are initializing or nosplash
         // was specified (splashdown = true)
         if (initialize || splashDown || bridge == null) {
@@ -2816,15 +2677,6 @@ public class DBeaverLauncher {
                 }
             });
         }
-        if (showSplash || endSplash != null) {
-            // Register the endSplashHandler to be run at VM shutdown. This hook will be
-            // removed once the splash screen has been taken down.
-            try {
-                Runtime.getRuntime().addShutdownHook(splashHandler);
-            } catch (Throwable ex) {
-                // Best effort to register the handler
-            }
-        }
 
         // if -endsplash is specified, use it and ignore any -showsplash command
         if (endSplash != null) {
@@ -2837,7 +2689,7 @@ public class DBeaverLauncher {
             return;
 
         // determine the splash location
-        splashLocation = getSplashLocation(defaultPath);
+        splashLocation = getSplashLocation();
         if (debug)
             System.out.println("Splash location:\n    " + splashLocation); //$NON-NLS-1$
         if (splashLocation == null)
@@ -2865,14 +2717,6 @@ public class DBeaverLauncher {
 
         splashDown = bridge.takeDownSplash();
         System.clearProperty(SPLASH_HANDLE);
-
-        if (splashHandler != null) {
-            try {
-                Runtime.getRuntime().removeShutdownHook(splashHandler);
-            } catch (Throwable e) {
-                // OK to ignore this, happens when the VM is already shutting down
-            }
-        }
     }
 
     /*
@@ -2880,7 +2724,7 @@ public class DBeaverLauncher {
      * If that does not work, look for a default splash.  Currently the splash must be in the file system
      * so the return value here is the file system path.
      */
-    private String getSplashLocation(URL[] bootPath) {
+    private String getSplashLocation() {
         //check the path passed in from -showsplash first.  The old launcher passed a timeout value
         //as the argument, so only use it if it isn't a number and the file exists.
         if (splashLocation != null && !Character.isDigit(splashLocation.charAt(0)) && new File(splashLocation).exists()) {
@@ -2897,7 +2741,7 @@ public class DBeaverLauncher {
             for (String e : entries) {
                 String entry = resolve(e);
                 if (entry != null && entry.startsWith(FILE_SCHEME)) {
-                    File entryFile = new File(entry.substring(5).replace('/', File.separatorChar));
+                    File entryFile = LauncherUtils.toFileURL(entry);
                     entry = searchFor(entryFile.getName(), entryFile.getParent());
                     if (entry != null)
                         path.add(entry);
@@ -2916,32 +2760,26 @@ public class DBeaverLauncher {
     }
 
     /*
-     * Do a locale-sensitive lookup of splash image
+     * Look for a splash image in the root of each plug-in.
      */
     private String searchForSplash(String[] searchPath) {
         if (searchPath == null)
             return null;
 
-        // Get the splash screen for the specified locale
-        String locale = System.getProperty(PROP_NL);
-        if (locale == null)
-            locale = Locale.getDefault().toString();
-        String[] nlVariants = buildNLVariants(locale);
-
-        for (String nlVariant : nlVariants) {
+        for (String image : SPLASH_IMAGES) {
             for (String path : searchPath) {
                 if (path.startsWith(FILE_SCHEME))
                     path = path.substring(5);
                 // do we have a JAR?
                 if (isJAR(path)) {
-                    String result = extractFromJAR(path, nlVariant);
+                    String result = extractFromJAR(path, image);
                     if (result != null)
                         return result;
                 } else {
                     // we have a file or a directory
                     if (!path.endsWith(File.separator))
                         path += File.separator;
-                    path += nlVariant;
+                    path += image;
                     File result = new File(path);
                     if (result.exists())
                         return result.getAbsolutePath(); // return the first match found [20063]
@@ -2957,7 +2795,7 @@ public class DBeaverLauncher {
      * Look for the specified spash file in the given JAR and extract it to the config
      * area for caching purposes.
      */
-    private String extractFromJAR(String jarPath, String jarEntry) {
+    String extractFromJAR(String jarPath, String jarEntry) {
         String configLocation = System.getProperty(PROP_CONFIG_AREA);
         if (configLocation == null) {
             log("Configuration area not set yet. Unable to extract " + jarEntry + " from JAR'd plug-in: " + jarPath); //$NON-NLS-1$ //$NON-NLS-2$
@@ -2967,47 +2805,69 @@ public class DBeaverLauncher {
         if (configURL == null)
             return null;
         // cache the splash in the equinox launcher sub-dir in the config area
-        File splash = new File(configURL.getPath(), PLUGIN_ID);
+        Path cacheRoot = new File(LauncherUtils.toFile(configURL), PLUGIN_ID).toPath().toAbsolutePath().normalize();
         //include the name of the jar in the cache location
         File jarFile = new File(jarPath);
         String cache = jarFile.getName();
         if (cache.endsWith(".jar")) //$NON-NLS-1$
             cache = cache.substring(0, cache.length() - 4);
-        splash = new File(splash, cache);
-        splash = new File(splash, jarEntry);
-        // if we have already extracted this file before, then return
-        if (splash.exists()) {
-            // if we are running with -clean then delete the cached splash file
-            boolean clean = false;
-            for (String command : commands) {
-                if (CLEAN.equalsIgnoreCase(command)) {
-                    clean = true;
-                    splash.delete();
-                    break;
-                }
-            }
-            if (!clean)
-                return splash.getAbsolutePath();
+        Path cacheDir = cacheRoot.resolve(cache).normalize();
+        if (!cacheDir.startsWith(cacheRoot) || cacheDir.equals(cacheRoot)) {
+            log("JAR cache directory resolves outside the launcher cache: " + jarPath); //$NON-NLS-1$
+            return null;
         }
 
-        try (ZipFile file = new ZipFile(jarPath)) {
-            ZipEntry entry = file.getEntry(jarEntry.replace(File.separatorChar, '/'));
-            if (entry == null)
-                return null;
-
-            Path outputFile = splash.toPath();
-            Files.createDirectories(outputFile.getParent());
-
-            try (InputStream input = file.getInputStream(entry)) {
-                Files.copy(input, outputFile);
-            } catch (IOException e) {
-                log("Exception opening splash: " + entry.getName() + " in JAR file: " + jarPath); //$NON-NLS-1$ //$NON-NLS-2$
-                log(e);
+        try {
+            Path splash = cacheDir.resolve(jarEntry).toAbsolutePath().normalize();
+            if (!splash.startsWith(cacheDir)) {
                 return null;
             }
+            Files.createDirectories(cacheRoot);
+            if (Files.isSymbolicLink(cacheRoot)) {
+                return null;
+            }
+            Path parent = cacheRoot;
+            for (Path part : cacheRoot.relativize(splash.getParent())) {
+                parent = parent.resolve(part);
+                if (Files.isSymbolicLink(parent)) {
+                    return null;
+                }
+                if (!Files.exists(parent)) {
+                    Files.createDirectory(parent);
+                }
+            }
+            // if we have already extracted this file before, then return
+            if (Files.exists(splash, LinkOption.NOFOLLOW_LINKS)) {
+                // if we are running with -clean then delete the cached splash file
+                boolean clean = false;
+                for (String command : commands) {
+                    if (CLEAN.equalsIgnoreCase(command)) {
+                        clean = true;
+                        Files.delete(splash);
+                        break;
+                    }
+                }
+                if (!clean && Files.isRegularFile(splash, LinkOption.NOFOLLOW_LINKS))
+                    return splash.toString();
+            }
 
-            return splash.exists() ? splash.getAbsolutePath() : null;
-        } catch (IOException e) {
+            if (!splash.getParent().toRealPath().startsWith(cacheRoot.toRealPath()) ||
+                Files.isSymbolicLink(splash) || Files.isDirectory(splash, LinkOption.NOFOLLOW_LINKS)) {
+                return null;
+            }
+            // Older bundled runtimes do not include the jdk.zipfs filesystem provider.
+            try (ZipFile archive = new ZipFile(jarFile)) {
+                ZipEntry sourceEntry = archive.getEntry(jarEntry.replace(File.separatorChar, '/'));
+                if (sourceEntry == null || sourceEntry.isDirectory()) {
+                    return null;
+                }
+                try (InputStream input = archive.getInputStream(sourceEntry)) {
+                    Files.copy(input, splash, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+
+            return splash.toString();
+        } catch (IOException | InvalidPathException e) {
             log("Exception looking for " + jarEntry + " in JAR file: " + jarPath); //$NON-NLS-1$ //$NON-NLS-2$
             log(e);
             return null;
@@ -3020,32 +2880,6 @@ public class DBeaverLauncher {
      */
     private boolean isJAR(String path) {
         return new File(path).isFile();
-    }
-
-    /*
-     * Build an array of path suffixes based on the given NL which is suitable
-     * for splash path searching.  The returned array contains paths in order
-     * from most specific to most generic. So, in the FR_fr locale, it will return
-     * candidates in "nl/fr/FR/", then "nl/fr/", and finally in the root.
-     * Candidate names are defined in SPLASH_IMAGES and include splash.png, splash.jpg, etc.
-     */
-    private static String[] buildNLVariants(String locale) {
-        //build list of suffixes for loading resource bundles
-        String nl = locale;
-        ArrayList<String> result = new ArrayList<>(4);
-        int lastSeparator;
-        while (true) {
-            for (String name : SPLASH_IMAGES) {
-                result.add("nl" + File.separatorChar + nl.replace('_', File.separatorChar) + File.separatorChar + name); //$NON-NLS-1$
-            }
-            lastSeparator = nl.lastIndexOf('_');
-            if (lastSeparator == -1)
-                break;
-            nl = nl.substring(0, lastSeparator);
-        }
-        //add the empty suffix last (most general)
-        Collections.addAll(result, SPLASH_IMAGES);
-        return result.toArray(new String[0]);
     }
 
     /*

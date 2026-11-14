@@ -35,7 +35,6 @@ import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.struct.DBSEntity;
 import org.jkiss.dbeaver.model.struct.DBSObject;
 import org.jkiss.dbeaver.model.struct.DBSObjectState;
-import org.jkiss.dbeaver.model.struct.rdb.DBSTablePartition;
 import org.jkiss.dbeaver.model.virtual.DBVUtils;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.utils.RuntimeUtils;
@@ -63,13 +62,8 @@ public class DBNModel {
     public static final String FAKE_RESOURCE_ROOT_NODE = "resources";
     private static final Log log = Log.getLog(DBNModel.class);
 
-    private static class NodePath {
-        final List<String> pathItems;
-
-        NodePath(@NotNull List<String> pathItems) {
-            this.pathItems = pathItems;
-        }
-
+    private record NodePath(@NotNull List<String> pathItems) {
+        @NotNull
         @Override
         public String toString() {
             return DBNNode.NODE_URI_PREFIX + pathItems;
@@ -160,8 +154,7 @@ public class DBNModel {
     }
 
     @NotNull
-    public DBNRoot getRoot()
-    {
+    public DBNRoot getRoot() {
         return root;
     }
 
@@ -171,8 +164,8 @@ public class DBNModel {
 
     @Nullable
     public DBNDatabaseNode findNode(@NotNull DBSObject object) {
-        if (object instanceof DBNDatabaseNode) {
-            return (DBNDatabaseNode)object;
+        if (object instanceof DBNDatabaseNode dbNode) {
+            return dbNode;
         } else {
             return this.getNodeByObject(object);
         }
@@ -180,8 +173,8 @@ public class DBNModel {
 
     @Nullable
     public DBNDatabaseNode getNodeByObject(@NotNull DBSObject object) {
-        if (object instanceof DBNDatabaseNode) {
-            return (DBNDatabaseNode)object;
+        if (object instanceof DBNDatabaseNode dbNode) {
+            return dbNode;
         }
         object = DBUtils.getPublicObjectContainer(object);
 
@@ -359,10 +352,12 @@ public class DBNModel {
         DBNNode[] children = currentNode.getChildren(monitor);
 
         DBNNode detectedNode = null;
-        for (DBNNode child : children) {
-            if (child.getNodeId().equals(expectedNodePathName)) {
-                detectedNode = child;
-                break;
+        if (children != null) {
+            for (DBNNode child : children) {
+                if (child.getNodeId().equals(expectedNodePathName)) {
+                    detectedNode = child;
+                    break;
+                }
             }
         }
 
@@ -397,8 +392,8 @@ public class DBNModel {
         boolean cached = false;
         if (!ArrayUtils.isEmpty(children)) {
             for (DBNDatabaseNode child : children) {
-                if (child instanceof DBNDatabaseFolder) {
-                    Class<?> itemsClass = ((DBNDatabaseFolder) child).getChildrenClass();
+                if (child instanceof DBNDatabaseFolder folder) {
+                    Class<?> itemsClass = folder.getChildrenClass();
                     if (itemsClass != null && itemsClass.isAssignableFrom(objectToCache.getClass())) {
                         cached = cacheNodeChildren(monitor, child, objectToCache, addFiltered);
                         if (cached) {
@@ -424,22 +419,15 @@ public class DBNModel {
     public DBNDatabaseNode getParentNode(@NotNull DBSObject object) {
         DBNDatabaseNode node = getNodeByObject(object);
         if (node != null) {
-            if (node.getParentNode() instanceof DBNDatabaseNode) {
-                return (DBNDatabaseNode) node.getParentNode();
+            if (node.getParentNode() instanceof DBNDatabaseNode dbNode) {
+                return dbNode;
             } else {
                 log.error("Object's " + object.getName() + "' parent node is not a database node: " + node.getParentNode());
                 return null;
             }
         }
         DBSObject[] path = DBUtils.getObjectPath(object, false);
-        DBSObject parentObject = object.getParentObject();
-        if ((object instanceof DBSTablePartition part) && part.needFullPath()) {
-            if (part.isSubPartition()) {
-                parentObject = part.getPartitionParent();
-            } else {
-                parentObject = part.getParentTable();
-            }
-        }
+        DBSObject parentObject = DBUtils.getStructuralParent(object);
         for (DBSObject item : path) {
             node = getNodeByObject(item);
             if (node == null) {
@@ -455,8 +443,8 @@ public class DBNModel {
             if (item == DBUtils.getPublicObjectContainer(parentObject)) {
                 // Try to find parent node withing children
                 for (DBNDatabaseNode child : children) {
-                    if (child instanceof DBNDatabaseFolder) {
-                        Class<?> itemsClass = ((DBNDatabaseFolder) child).getChildrenClass();
+                    if (child instanceof DBNDatabaseFolder folder) {
+                        Class<?> itemsClass = folder.getChildrenClass();
                         if (itemsClass != null && itemsClass.isAssignableFrom(object.getClass())) {
                             return child;
                         }
@@ -468,11 +456,6 @@ public class DBNModel {
         }
         // Not found
         return null;
-    }
-
-    void addNode(@NotNull DBNDatabaseNode node)
-    {
-        addNode(node, false);
     }
 
     void addNode(@NotNull DBNDatabaseNode node, boolean reflect) {
@@ -511,7 +494,7 @@ public class DBNModel {
                 if (nodeMap.remove(node.getObject()) != node) {
                     badNode = true;
                 }
-            } else if (obj instanceof List) {
+            } else if (obj instanceof List<?>) {
                 // Multiple nodes
                 @SuppressWarnings("unchecked")
                 List<DBNNode> nodeList = (List<DBNNode>) obj;
@@ -577,8 +560,9 @@ public class DBNModel {
             return image;
         }
         if (image instanceof DBIconComposite ic) {
-            ic.setBottomRight(overlayImage);
-            return image;
+            // driver icons may be shared by connected and disconnected data sources
+            return new DBIconComposite(ic.getMain(), ic.isDisabled(), ic.getTopLeft(), ic.getTopRight(),
+                ic.getBottomLeft(), overlayImage);
         }
         return new DBIconComposite(image, false, null, null, null, overlayImage);
     }
@@ -645,9 +629,9 @@ public class DBNModel {
 
                 try {
                     DBWorkbench.getPlatformUI().executeInMainThread(() -> {
-                        for (int i = 0; i < realEvents.length; i++) {
+                        for (DBNEvent realEvent : realEvents) {
                             for (INavigatorListener listener : listenersCopy) {
-                                listener.nodeChanged(realEvents[i]);
+                                listener.nodeChanged(realEvent);
                             }
                         }
                     });

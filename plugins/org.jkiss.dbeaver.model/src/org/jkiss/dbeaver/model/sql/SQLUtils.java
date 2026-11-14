@@ -173,6 +173,141 @@ public final class SQLUtils {
         );
     }
 
+    /**
+     * Blanks out dialect-specific single-line comments (e.g. MySQL #) that JSQLParser doesn't recognize.
+     * Comment prefixes found inside string or identifier literals are left untouched.
+     */
+    @NotNull
+    public static String maskDialectLineComments(@NotNull SQLDialect dialect, @NotNull String sql) {
+        List<String> extraCommentPrefixes = ArrayUtils.safeArray(dialect.getSingleLineComments()).stream()
+            .filter(prefix -> !CommonUtils.isEmpty(prefix) && !prefix.startsWith(SQLConstants.SL_COMMENT))
+            .toList();
+        if (extraCommentPrefixes.isEmpty()) {
+            return sql;
+        }
+        String[][] identifierQuotes = dialect.getIdentifierQuoteStrings();
+        String[][] quotes = identifierQuotes == null
+            ? dialect.getStringQuoteStrings()
+            : ArrayUtils.concatArrays(dialect.getStringQuoteStrings(), identifierQuotes);
+        char escapeChar = dialect.getStringEscapeCharacter();
+        StringBuilder result = new StringBuilder(sql);
+        int pos = 0;
+        while (pos < sql.length()) {
+            String[] quote = quoteStartingAt(sql, pos, quotes);
+            if (escapeChar != 0 && sql.charAt(pos) == escapeChar) {
+                pos += 2; // skip an escaped char, so a stray "\'" can't open a phantom string
+            } else if (quote != null) {
+                pos = skipQuoted(sql, pos, quote, escapeChar);
+            } else if (sql.startsWith(SQLConstants.SL_COMMENT, pos)) {
+                pos = getLineEnd(sql, pos);
+            } else if (sql.startsWith(SQLConstants.ML_COMMENT_START, pos)) {
+                int end = sql.indexOf(SQLConstants.ML_COMMENT_END, pos + 2);
+                pos = end < 0 ? sql.length() : end + 2;
+            } else if (startsWithAny(sql, pos, extraCommentPrefixes)) {
+                int lineEnd = getLineEnd(sql, pos);
+                result.replace(pos, lineEnd, " ".repeat(lineEnd - pos));
+                pos = lineEnd;
+            } else {
+                pos++;
+            }
+        }
+        return result.toString();
+    }
+
+    /**
+     * Finds the position of the first single-line comment marker.
+     * Markers inside a string literal or a quoted identifier are ignored.
+     *
+     * @param dialect the dialect providing the comment marker and the quoting rules
+     * @param sql     the SQL to scan
+     * @param start   the index to start scanning from
+     * @return the position of the comment marker, or -1 if there is none
+     */
+    public static int findLineCommentPos(@NotNull SQLDialect dialect, @NotNull CharSequence sql, int start) {
+        String[] slComments = dialect.getSingleLineComments();
+        if (ArrayUtils.isEmpty(slComments) || CommonUtils.isEmpty(slComments[0])) {
+            return -1;
+        }
+        String slComment = slComments[0];
+        String[][] stringQuotes = dialect.getStringQuoteStrings();
+        String[][] identifierQuotes = dialect.getIdentifierQuoteStrings();
+        char escapeChar = dialect.getStringEscapeCharacter();
+        int pos = start;
+        while (pos < sql.length()) {
+            String[] stringQuote = quoteStartingAt(sql, pos, stringQuotes);
+            if (stringQuote != null) {
+                pos = skipQuoted(sql, pos, stringQuote, escapeChar);
+                continue;
+            }
+            String[] identifierQuote = identifierQuotes == null
+                ? null
+                : quoteStartingAt(sql, pos, identifierQuotes);
+            if (identifierQuote != null) {
+                // Identifiers escape a quote by doubling it, so escapeChar must not consume the closing quote
+                pos = skipQuoted(sql, pos, identifierQuote, (char) 0);
+                continue;
+            }
+            if (startsWith(sql, slComment, pos)) {
+                return pos;
+            }
+            pos++;
+        }
+        return -1;
+    }
+
+    @Nullable
+    private static String[] quoteStartingAt(@NotNull CharSequence sql, int pos, @NotNull String[][] quotes) {
+        for (String[] quote : quotes) {
+            if (startsWith(sql, quote[0], pos)) {
+                return quote;
+            }
+        }
+        return null;
+    }
+
+    private static int skipQuoted(@NotNull CharSequence sql, int openPos, @NotNull String[] quote, char escapeChar) {
+        String close = quote[1];
+        int pos = openPos + quote[0].length();
+        while (pos < sql.length()) {
+            if (escapeChar != 0 && sql.charAt(pos) == escapeChar) {
+                pos += 2;
+            } else if (startsWith(sql, close, pos)) {
+                return pos + close.length();
+            } else {
+                pos++;
+            }
+        }
+        return sql.length();
+    }
+
+    private static boolean startsWithAny(@NotNull String sql, int pos, @NotNull List<String> prefixes) {
+        for (String prefix : prefixes) {
+            if (sql.startsWith(prefix, pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean startsWith(@NotNull CharSequence sql, @NotNull String prefix, int offset) {
+        if (offset < 0 || offset > sql.length() - prefix.length()) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length(); i++) {
+            if (sql.charAt(offset + i) != prefix.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int getLineEnd(@NotNull String sql, int pos) {
+        while (pos < sql.length() && sql.charAt(pos) != '\n' && sql.charAt(pos) != '\r') {
+            pos++;
+        }
+        return pos;
+    }
+
     @NotNull
     public static String[] extractComments(@NotNull SQLDialect dialect, @NotNull String query) {
         if (query.isEmpty()) {
@@ -388,6 +523,11 @@ public final class SQLUtils {
 
     public static boolean isStringQuoted(@NotNull DBSObject object, @NotNull String string) {
         return object.getDataSource().getSQLDialect().isQuotedString(string);
+    }
+
+    @NotNull
+    public static String quoteString(@NotNull DBPObject object, @NotNull String string) {
+        return getDialectFromObject(object).getQuotedString(string);
     }
 
     @NotNull

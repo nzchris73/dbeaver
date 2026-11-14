@@ -28,7 +28,9 @@ import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.*;
 import org.jkiss.dbeaver.model.access.DBAAuthProfile;
+import org.jkiss.dbeaver.model.app.DBPApplication;
 import org.jkiss.dbeaver.model.app.DBPDataSourceRegistry;
+import org.jkiss.dbeaver.model.app.DBPProject;
 import org.jkiss.dbeaver.model.auth.SMObjectType;
 import org.jkiss.dbeaver.model.connection.*;
 import org.jkiss.dbeaver.model.data.json.JSONUtils;
@@ -88,6 +90,16 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
 
     protected DataSourceSerializerModern(@NotNull DataSourceRegistry<T> registry) {
         this.registry = registry;
+    }
+
+    @NotNull
+    protected DBPApplication getApplication() {
+        return DBWorkbench.getPlatform().getApplication();
+    }
+
+    @NotNull
+    protected DBPDataSourceProviderRegistry getDataSourceProviderRegistry() {
+        return DBWorkbench.getPlatform().getDataSourceProviderRegistry();
     }
 
     @Override
@@ -206,7 +218,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                             JSONUtils.field(jsonWriter, "close-transactions-period", ct.getCloseIdleTransactionPeriod());
                             JSONUtils.field(jsonWriter, "auto-close-connections", ct.isAutoCloseConnections());
                             JSONUtils.field(jsonWriter, "close-connections-period", ct.getCloseIdleConnectionPeriod());
-                            serializeModifyPermissions(jsonWriter, ct);
+                            serializeModifyPermissions(jsonWriter, ct, true);
                             jsonWriter.endObject();
                         }
                         jsonWriter.endObject();
@@ -291,17 +303,18 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
         jsonWriter.endObject();
     }
 
-    private String loadConfigFile(@NotNull InputStream stream, boolean decrypt) throws DBException, IOException {
+    @NotNull
+    private static String loadConfigFile(
+        @NotNull DBPProject project,
+        @NotNull InputStream stream,
+        boolean decrypt
+    ) throws DBException, IOException {
         ByteArrayOutputStream credBuffer = new ByteArrayOutputStream();
-        try {
-            IOUtils.copyStream(stream, credBuffer);
-        } catch (Exception e) {
-            log.error("Error reading secure credentials file", e);
-        }
+        IOUtils.copyStream(stream, credBuffer);
         if (!decrypt) {
             return credBuffer.toString(StandardCharsets.UTF_8);
         } else {
-            DBSValueEncryptor encryptor = registry.getProject().getValueEncryptor();
+            DBSValueEncryptor encryptor = project.getValueEncryptor();
             try {
                 return new String(encryptor.decryptValue(credBuffer.toByteArray()), StandardCharsets.UTF_8);
             } catch (Exception e) {
@@ -374,7 +387,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
             throw new DBInterruptedException("Project secure credentials read canceled by user.");
         }
         try {
-            configurationMap = readConfiguration(configurationStorage, configurationManager, dataSourceIds);
+            configurationMap = readConfiguration(registry.getProject(), configurationStorage, configurationManager, dataSourceIds);
         } catch (DBInterruptedException e) {
             throw e;
         } catch (DBException e) {
@@ -423,9 +436,11 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
         if (configurationMap != null) {
             // Folders
             for (Map.Entry<String, Map<String, Object>> folderMap : JSONUtils.getNestedObjects(configurationMap, CONFIGURATION_FOLDERS)) {
-                String name = folderMap.getKey();
+                String folderPath = getFolderPath(folderMap.getKey(), folderMap.getValue());
+                int separatorIndex = folderPath.lastIndexOf('/');
+                String name = separatorIndex < 0 ? folderPath : folderPath.substring(separatorIndex + 1);
+                String parentFolder = separatorIndex < 0 ? null : folderPath.substring(0, separatorIndex);
                 String description = JSONUtils.getObjectProperty(folderMap.getValue(), RegistryConstants.ATTR_DESCRIPTION);
-                String parentFolder = JSONUtils.getObjectProperty(folderMap.getValue(), RegistryConstants.ATTR_PARENT);
                 DataSourceFolder parent = parentFolder == null ? null : registry.findFolderByPath(parentFolder, true, parseResults);
                 DataSourceFolder folder = parent == null ? registry.findFolderByPath(name, true, parseResults) : parent.getChild(name);
                 if (folder == null) {
@@ -437,26 +452,32 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                 }
             }
 
-            // Connection types
-            for (Map.Entry<String, Map<String, Object>> ctMap : JSONUtils.getNestedObjects(configurationMap, "connection-types")) {
-                String id = ctMap.getKey();
-                Map<String, Object> ctConfig = ctMap.getValue();
-                String name = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_NAME);
-                String description = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_DESCRIPTION);
-                String color = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_COLOR);
-                String alternativeColor = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_COLOR_DARK);
-                Boolean autoCommit = JSONUtils.getObjectProperty(ctConfig, "auto-commit");
-                Boolean confirmExecute = JSONUtils.getObjectProperty(ctConfig, "confirm-execute");
-                Boolean confirmDataChange = JSONUtils.getObjectProperty(ctConfig, "confirm-data-change");
-                Boolean smartCommit = JSONUtils.getObjectProperty(ctConfig, "smart-commit");
-                Boolean smartCommitRecover = JSONUtils.getObjectProperty(ctConfig, "smart-commit-recover");
-                Boolean autoCloseTransactions = JSONUtils.getObjectProperty(ctConfig, "auto-close-transactions");
-                Object closeTransactionsPeriod = JSONUtils.getObjectProperty(ctConfig, "close-transactions-period");
-                Boolean autoCloseConnections = JSONUtils.getObjectProperty(ctConfig, "auto-close-connections");
-                Object closeConnectionsPeriod = JSONUtils.getObjectProperty(ctConfig, "close-connections-period");
-                DBPConnectionType ct = DBWorkbench.getPlatform().getDataSourceProviderRegistry().getConnectionType(id, null);
-                if (ct == null) {
-                    ct = new DBPConnectionType(
+            // Connection types are managed globally in multi-user environments.
+            if (!getApplication().isMultiuser() && !getApplication().isDistributed()) {
+                DBPDataSourceProviderRegistry providerRegistry = getDataSourceProviderRegistry();
+                for (Map.Entry<String, Map<String, Object>> ctMap : JSONUtils.getNestedObjects(configurationMap, "connection-types")) {
+                    String id = ctMap.getKey();
+                    Map<String, Object> ctConfig = ctMap.getValue();
+                    //if type exists we dont override it from datasources
+                    if (providerRegistry
+                        .getConnectionType(id, null) != null
+                    ) {
+                        continue;
+                    }
+                    String name = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_NAME);
+                    String description = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_DESCRIPTION);
+                    String color = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_COLOR);
+                    String alternativeColor = JSONUtils.getObjectProperty(ctConfig, RegistryConstants.ATTR_COLOR_DARK);
+                    Boolean autoCommit = JSONUtils.getObjectProperty(ctConfig, "auto-commit");
+                    Boolean confirmExecute = JSONUtils.getObjectProperty(ctConfig, "confirm-execute");
+                    Boolean confirmDataChange = JSONUtils.getObjectProperty(ctConfig, "confirm-data-change");
+                    Boolean smartCommit = JSONUtils.getObjectProperty(ctConfig, "smart-commit");
+                    Boolean smartCommitRecover = JSONUtils.getObjectProperty(ctConfig, "smart-commit-recover");
+                    Boolean autoCloseTransactions = JSONUtils.getObjectProperty(ctConfig, "auto-close-transactions");
+                    Object closeTransactionsPeriod = JSONUtils.getObjectProperty(ctConfig, "close-transactions-period");
+                    Boolean autoCloseConnections = JSONUtils.getObjectProperty(ctConfig, "auto-close-connections");
+                    Object closeConnectionsPeriod = JSONUtils.getObjectProperty(ctConfig, "close-connections-period");
+                    DBPConnectionType ct = new DBPConnectionType(
                         id,
                         name,
                         color,
@@ -470,10 +491,11 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                         CommonUtils.toBoolean(autoCloseTransactions),
                         CommonUtils.toInt(closeTransactionsPeriod),
                         CommonUtils.toBoolean(autoCloseConnections),
-                        CommonUtils.toInt(closeConnectionsPeriod));
-                    DBWorkbench.getPlatform().getDataSourceProviderRegistry().addConnectionType(ct);
+                        CommonUtils.toInt(closeConnectionsPeriod)
+                    );
+                    providerRegistry.addConnectionType(ct);
+                    deserializeModifyPermissions(ctConfig, ct);
                 }
-                deserializeModifyPermissions(ctConfig, ct);
             }
 
             // Drivers
@@ -606,6 +628,10 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     dataSource.getConnectionConfiguration().setHandlers(Collections.emptyList());
                     dataSource.clearFilters();
                 }
+                boolean sharedCredentialsDisabled = !newDataSource && dataSource.isSharedCredentials() && !JSONUtils.getBoolean(
+                    conObject,
+                    RegistryConstants.ATTR_SHARED_CREDENTIALS
+                );
                 deserializeDataSource(parseResults, dataSource, conObject);
 
                 // Connection settings
@@ -618,10 +644,20 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     config.setDatabaseName(JSONUtils.getString(cfgObject, RegistryConstants.ATTR_DATABASE));
                     config.setUrl(JSONUtils.getString(cfgObject, RegistryConstants.ATTR_URL));
 
-                        final SecureCredentials creds = configurationManager.isSecure() ?
-                            DataSourceParser.readPlainCredentials(cfgObject) :
-                            DataSourceParser.readSecuredCredentials(contextParameters, dataSource, null, null);
-                    if (shouldUpdateCreds(creds)) {
+                    final SecureCredentials creds = configurationManager.isSecure() ?
+                        DataSourceParser.readPlainCredentials(cfgObject) :
+                        DataSourceParser.readSecuredCredentials(contextParameters, dataSource, null, null);
+                    boolean credentialsUpdated = shouldUpdateCreds(creds);
+                    boolean serializedCredentialsConfigured = credentialsUpdated ||
+                        cfgObject.containsKey(RegistryConstants.ATTR_USER) ||
+                        cfgObject.containsKey(RegistryConstants.ATTR_PASSWORD) ||
+                        cfgObject.containsKey(RegistryConstants.TAG_AUTH_PROPERTIES);
+                    if (!credentialsUpdated && serializedCredentialsConfigured) {
+                        config.setUserName(null);
+                        config.setUserPassword(null);
+                        config.setAuthProperties(null);
+                    }
+                    if (credentialsUpdated) {
                         config.setUserName(creds.getUserName());
                         if (dataSource.isSavePassword() || !CommonUtils.isEmpty(creds.getUserPassword())) {
                             config.setUserPassword(creds.getUserPassword());
@@ -634,7 +670,6 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                             dataSource.setSavePassword(true);
                         }
                         dataSource.getConnectionConfiguration().setAuthProperties(creds.getProperties());
-                        dataSource.resetAllSecrets();
                     }
                     {
                         // Still try to read credentials directly from configuration (#6564)
@@ -664,8 +699,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     if (keepAlive > 0) {
                         config.setKeepAliveInterval(keepAlive);
                     }
-                    boolean closeIdleEnabled = JSONUtils.getBoolean(cfgObject, RegistryConstants.ATTR_CLOSE_IDLE_ENABLED);
-                    config.setCloseIdleConnection(closeIdleEnabled);
+                    config.setCloseIdleConnection(readCloseIdleConnectionSetting(cfgObject));
                     int closeIdle = JSONUtils.getInteger(cfgObject, RegistryConstants.ATTR_CLOSE_IDLE);
                     if (closeIdle > 0) {
                         config.setCloseIdleInterval(closeIdle);
@@ -679,8 +713,18 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     if (cfgObject.containsKey(RegistryConstants.TAG_AUTH_PROPERTIES)) {
                         config.setAuthProperties(JSONUtils.deserializeStringMapOrNull(cfgObject, RegistryConstants.TAG_AUTH_PROPERTIES));
                     }
+                    if (serializedCredentialsConfigured) {
+                        dataSource.sharedCredentialsRevoked = false;
+                    } else if (sharedCredentialsDisabled) {
+                        dataSource.sharedCredentialsRevoked = true;
+                    }
+                    if (serializedCredentialsConfigured || sharedCredentialsDisabled) {
+                        dataSource.resetAllSecrets();
+                    }
 
                     // Events
+                    //clear config before reading it, to remove any disabled commands
+                    config.clearEvents();
                     for (Map.Entry<String, Map<String, Object>> eventObject : JSONUtils.getNestedObjects(cfgObject, RegistryConstants.TAG_EVENTS)) {
                         DBPConnectionEventType eventType = CommonUtils.valueOf(DBPConnectionEventType.class, eventObject.getKey(), DBPConnectionEventType.BEFORE_CONNECT);
                         Map<String, Object> eventCfg = eventObject.getValue();
@@ -709,8 +753,10 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
 
                     // Bootstrap
                     Map<String, Object> bootstrapCfg = JSONUtils.getObject(cfgObject, RegistryConstants.TAG_BOOTSTRAP);
+                    DBPConnectionBootstrap bootstrap = config.getBootstrap();
+                    // we need to reset bootstrap to avoid keeping old values when bootstrap is not specified in the configuration
+                    bootstrap.reset();
                     if (!bootstrapCfg.isEmpty()) {
-                        DBPConnectionBootstrap bootstrap = config.getBootstrap();
                         if (bootstrapCfg.containsKey(RegistryConstants.ATTR_AUTOCOMMIT)) {
                             bootstrap.setDefaultAutoCommit(JSONUtils.getBoolean(bootstrapCfg, RegistryConstants.ATTR_AUTOCOMMIT));
                         }
@@ -734,7 +780,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     }
 
                     if (originalDriver != substitutedDriver) {
-                        if (substitutedDriver.getProviderDescriptor().supportsDriverMigration()) {
+                        if (shouldCheckProviderMigration(substitutedDriver.getProviderDescriptor(), config)) {
                             final DBPDataSourceProvider dataSourceProvider = substitutedDriver.getDataSourceProvider();
                             if (dataSourceProvider instanceof DBPConnectionConfigurationMigrator migrator) {
                                 if (migrator.migrationRequired(config)) {
@@ -809,8 +855,12 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                     connectionConfigurationChanged = true;
                 } else {
                     parseResults.updatedDataSources.add(dataSource);
-                    if (!dataSource.equalSettings(oldDataSource)) {
-                        connectionConfigurationChanged = true;
+                    try {
+                        if (!dataSource.equalSettings(oldDataSource)) {
+                            connectionConfigurationChanged = true;
+                        }
+                    } finally {
+                        oldDataSource.dispose();
                     }
                 }
             }
@@ -820,9 +870,35 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                 DBSObjectFilter filter = filterSerializer.deserializeObjectFilter(ctMap);
                 registry.addSavedFilter(filter);
             }
+            // Shared and unused parsed models are templates, not owned by a data source.
+            for (DBVModel model : modelMap.values()) {
+                if (model.getDataSourceContainer() == null) {
+                    model.dispose();
+                }
+            }
         }
         return connectionConfigurationChanged;
 
+    }
+
+    public static boolean shouldCheckProviderMigration(
+        @NotNull DBPDataSourceProviderDescriptor providerDescriptor,
+        @NotNull DBPConnectionConfiguration configuration
+    ) {
+        if (!providerDescriptor.supportsDriverMigration()) {
+            return false;
+        }
+        String completedProperty = providerDescriptor instanceof DataSourceProviderDescriptor descriptor
+            ? descriptor.getMigrationCompletedProperty() : null;
+        return completedProperty == null || configuration.getProviderProperty(completedProperty) == null;
+    }
+
+    public static boolean readCloseIdleConnectionSetting(@NotNull Map<String, Object> configuration) {
+        return JSONUtils.getBoolean(
+            configuration,
+            RegistryConstants.ATTR_CLOSE_IDLE_ENABLED,
+            DBPConnectionConfiguration.CLOSE_IDLE_CONNECTION_DEFAULT
+        );
     }
 
     protected void deserializeDataSource(
@@ -832,9 +908,10 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
     ) {
         dataSource.setName(CommonUtils.notNull(JSONUtils.getString(conObject, RegistryConstants.ATTR_NAME), "?"));
         dataSource.setDescription(JSONUtils.getString(conObject, RegistryConstants.TAG_DESCRIPTION));
-        dataSource.forceSetSharedCredentials(JSONUtils.getBoolean(
+        boolean sharedCredentials = JSONUtils.getBoolean(
             conObject,
-            RegistryConstants.ATTR_SHARED_CREDENTIALS));
+            RegistryConstants.ATTR_SHARED_CREDENTIALS);
+        dataSource.forceSetSharedCredentials(sharedCredentials);
         dataSource.setSavePassword(JSONUtils.getBoolean(conObject, RegistryConstants.ATTR_SAVE_PASSWORD));
         dataSource.setDriverSubstitution(DataSourceProviderRegistry.getInstance()
             .getDriverSubstitution(CommonUtils.notEmpty(JSONUtils.getString(conObject, ATTR_DRIVER_SUBSTITUTION))));
@@ -888,7 +965,8 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
     }
 
     private boolean shouldUpdateCreds(@NotNull SecureCredentials creds) {
-        boolean isCredsResolved = creds.getUserName() != null && creds.getUserPassword() != null;
+        boolean isCredsResolved = (creds.getUserName() != null && creds.getUserPassword() != null) ||
+            !CommonUtils.isEmpty(creds.getProperties());
         return isCredsResolved
             // in TE secrets must be resolved by dataSource itself, if not present here
             || !DBWorkbench.isDistributed();
@@ -919,7 +997,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
             if (is == null) {
                 return null;
             }
-            final String data = loadConfigFile(is, true);
+            String data = loadConfigFile(registry.getProject(), is, true);
             return CONFIG_GSON.fromJson(data, new TypeToken<Map<String, Map<String, Map<String, String>>>>() {
             }.getType());
         } catch (IOException e) {
@@ -930,12 +1008,13 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
     }
 
     @Nullable
-    private Map<String, Object> readConfiguration(
+    static Map<String, Object> readConfiguration(
+        @NotNull DBPProject project,
         @NotNull DBPDataSourceConfigurationStorage configurationStorage,
         @NotNull DataSourceConfigurationManager configurationManager,
         @Nullable Collection<String> dataSourceIds
     ) throws DBException, IOException {
-        final InputStream is;
+        InputStream is;
         if (configurationStorage instanceof DataSourceMemoryStorage) {
             is = ((DataSourceMemoryStorage) configurationStorage).getInputStream();
         } else {
@@ -945,7 +1024,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
             return null;
         }
         try (is) {
-            final String data = loadConfigFile(is, CommonUtils.toBoolean(registry.getProject().isEncryptedProject()));
+            String data = loadConfigFile(project, is, project.isEncryptedProject());
             return JSONUtils.parseMap(CONFIG_GSON, new StringReader(data));
         } catch (DBInterruptedException e) {
             // happens only if user cancelled entering password
@@ -1026,12 +1105,9 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
     }
 
     private static void saveFolder(@NotNull JsonWriter json, @NotNull DataSourceFolder folder) throws IOException {
-        json.name(folder.getName());
+        json.name(folder.getFolderPath());
 
         json.beginObject();
-        if (folder.getParent() != null) {
-            JSONUtils.field(json, RegistryConstants.ATTR_PARENT, folder.getParent().getFolderPath());
-        }
         JSONUtils.fieldNE(json, RegistryConstants.ATTR_DESCRIPTION, folder.getDescription());
 
         json.endObject();
@@ -1138,7 +1214,9 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
             if (connectionInfo.getKeepAliveInterval() > 0) {
                 JSONUtils.field(json, RegistryConstants.ATTR_KEEP_ALIVE, connectionInfo.getKeepAliveInterval());
             }
-            JSONUtils.field(json, RegistryConstants.ATTR_CLOSE_IDLE_ENABLED, connectionInfo.isCloseIdleConnection());
+            if (connectionInfo.isCloseIdleConnection() != DBPConnectionConfiguration.CLOSE_IDLE_CONNECTION_DEFAULT) {
+                JSONUtils.field(json, RegistryConstants.ATTR_CLOSE_IDLE_ENABLED, connectionInfo.isCloseIdleConnection());
+            }
             if (connectionInfo.getCloseIdleInterval() > 0) {
                 JSONUtils.field(json, RegistryConstants.ATTR_CLOSE_IDLE, connectionInfo.getCloseIdleInterval());
             }
@@ -1154,7 +1232,7 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
                 json.beginObject();
                 for (DBPConnectionEventType eventType : connectionInfo.getDeclaredEvents()) {
                     DBRShellCommand command = connectionInfo.getEvent(eventType);
-                    if (!command.isEnabled()) {
+                    if (command == null) {
                         continue;
                     }
                     json.name(eventType.name());
@@ -1260,17 +1338,31 @@ public class DataSourceSerializerModern<T extends DataSourceDescriptor> implemen
         @NotNull JsonWriter json,
         @NotNull DBPDataSourcePermissionOwner permissionOwner
     ) throws IOException {
+        serializeModifyPermissions(json, permissionOwner, false);
+    }
+
+    private void serializeModifyPermissions(
+        @NotNull JsonWriter json,
+        @NotNull DBPDataSourcePermissionOwner permissionOwner,
+        boolean serializeEmpty
+    ) throws IOException {
         List<DBPDataSourcePermission> permissions = permissionOwner.getModifyPermission();
-        if (!CommonUtils.isEmpty(permissions)) {
+        if (!CommonUtils.isEmpty(permissions) || serializeEmpty) {
             json.name("security");
             json.beginObject();
             List<String> permIds = new ArrayList<>(permissions.size());
             for (DBPDataSourcePermission perm : permissions) permIds.add(perm.getId());
-            JSONUtils.serializeStringList(json, "permission-restrictions", permIds);
+            JSONUtils.serializeStringList(json, "permission-restrictions", permIds, true, serializeEmpty);
             json.endObject();
         }
     }
 
+
+    @NotNull
+    protected static String getFolderPath(@NotNull String name, @NotNull Map<String, Object> configuration) {
+        String parentFolder = JSONUtils.getObjectProperty(configuration, RegistryConstants.ATTR_PARENT);
+        return parentFolder == null ? name : parentFolder + "/" + name;
+    }
 
     @NotNull
     private static DBPDriver getReplacementDriver(@NotNull DBPDriver driver) {

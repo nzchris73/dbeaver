@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,14 @@ import org.jkiss.dbeaver.model.impl.jdbc.JDBCExecutionContext;
 import org.jkiss.dbeaver.model.impl.jdbc.JDBCRemoteInstance;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 
+import java.util.regex.Pattern;
+
 /**
  * DuckDB Data source
  */
 public class DuckDBDataSource extends GenericDataSource {
+    private static final Pattern ARRAY_TYPE_NAME_PATTERN = Pattern.compile("\\[\\s*\\d*\\s*\\]\\s*$");
+
     public DuckDBDataSource(DBRProgressMonitor monitor, DBPDataSourceContainer container, GenericMetaModel metaModel) throws DBException {
         super(monitor, container, metaModel, new DuckDBSQLDialect());
     }
@@ -41,17 +45,22 @@ public class DuckDBDataSource extends GenericDataSource {
     public DBPDataKind resolveDataKind(@NotNull String typeName, int valueType) {
         if (DuckDBConstants.isGeometryType(typeName)) {
             return DBPDataKind.OBJECT;
+        } else if (ARRAY_TYPE_NAME_PATTERN.matcher(typeName).find()) {
+            return DBPDataKind.ARRAY;
+        } else {
+            return super.resolveDataKind(typeName, valueType);
         }
-        return super.resolveDataKind(typeName, valueType);
     }
 
+    @NotNull
     @Override
-    protected DBPDataSourceInfo createDataSourceInfo(DBRProgressMonitor monitor, @NotNull JDBCDatabaseMetaData metaData) {
+    protected DBPDataSourceInfo createDataSourceInfo(@NotNull DBRProgressMonitor monitor, @NotNull JDBCDatabaseMetaData metaData) {
         return new DuckDBDataSourceInfo(getContainer().getDriver(), metaData);
     }
 
+    @NotNull
     @Override
-    protected JDBCExecutionContext createExecutionContext(JDBCRemoteInstance instance, String type) {
+    protected JDBCExecutionContext createExecutionContext(@NotNull JDBCRemoteInstance instance, @NotNull String type) {
         return new DuckDBExecutionContext(instance, type);
     }
 }

@@ -18,8 +18,7 @@ package org.jkiss.dbeaver.ui.preferences;
 
 import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.*;
 import org.eclipse.ui.IWorkbench;
@@ -38,6 +37,7 @@ import org.jkiss.dbeaver.ui.UIIcon;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.dialogs.DialogUtils;
 import org.jkiss.dbeaver.ui.dialogs.EnterNameDialog;
+import org.jkiss.dbeaver.ui.dialogs.driver.DataSourceTypeViewer;
 import org.jkiss.dbeaver.ui.internal.UIConnectionMessages;
 import org.jkiss.dbeaver.utils.PrefUtils;
 import org.jkiss.utils.CommonUtils;
@@ -53,6 +53,7 @@ public class PrefPageDrivers extends AbstractPrefPage implements IWorkbenchPrefe
     public static final String PAGE_ID = "org.jkiss.dbeaver.preferences.drivers"; //$NON-NLS-1$
 
     private Button versionUpdateCheck;
+    private Button showCommercialDrivers;
 
     private List sourceList;
 
@@ -88,6 +89,14 @@ public class PrefPageDrivers extends AbstractPrefPage implements IWorkbenchPrefe
                 UIConnectionMessages.pref_page_ui_general_check_new_driver_versions_tip,
                 store.getBoolean(ModelPreferences.UI_DRIVERS_VERSION_UPDATE), 1
             );
+            if (DataSourceTypeViewer.isCommercialDriversEnabled()) {
+                showCommercialDrivers = UIUtils.createCheckbox(
+                    settings,
+                    UIConnectionMessages.dialog_connection_show_commercial_drivers,
+                    store.getBoolean(UIPreferences.DRIVER_SELECTOR_SHOW_COMMERCIAL_DRIVERS)
+                );
+                showCommercialDrivers.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            }
         }
 
         {
@@ -140,39 +149,27 @@ public class PrefPageDrivers extends AbstractPrefPage implements IWorkbenchPrefe
 
             final ToolBar toolbar = new ToolBar(repoGroup, SWT.VERTICAL);
             toolbar.setLayoutData(new GridData(GridData.VERTICAL_ALIGN_BEGINNING));
-            UIUtils.createToolItem(toolbar, UIConnectionMessages.pref_page_drivers_button_add, UIIcon.ADD, new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e)
-                {
+            UIUtils.createToolItem(toolbar, UIConnectionMessages.pref_page_drivers_button_add, UIIcon.ADD, SelectionListener.widgetSelectedAdapter(e -> {
                     String url = EnterNameDialog.chooseName(getShell(), UIConnectionMessages.pref_page_drivers_label_enter_drivers_location_url, "http://");
                     if (url != null) {
                         sourceList.add(url);
                     }
-                }
-            });
-            final ToolItem removeButton = UIUtils.createToolItem(toolbar, UIConnectionMessages.pref_page_drivers_button_remove, UIIcon.DELETE, new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e)
-                {
+                }));
+            final ToolItem removeButton = UIUtils.createToolItem(toolbar, UIConnectionMessages.pref_page_drivers_button_remove, UIIcon.DELETE, SelectionListener.widgetSelectedAdapter(e -> {
                     final int index = sourceList.getSelectionIndex();
                     sourceList.remove(index);
                     sourceList.select(CommonUtils.clamp(index, 0, sourceList.getItemCount() - 1));
                     sourceList.notifyListeners(SWT.Selection, new Event());
-                }
-            });
+                }));
             removeButton.setEnabled(false);
 
-            sourceList.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e)
-                {
+            sourceList.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                     if (sourceList.getSelectionIndex() >= 0) {
                         removeButton.setEnabled(sourceList.getItemCount() > 1);
                     } else {
                         removeButton.setEnabled(false);
                     }
-                }
-            });
+                }));
             Control tip = UIUtils.createInfoLabel(repoGroup, UIConnectionMessages.pref_page_drivers_repo_info);
             tip.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING, GridData.VERTICAL_ALIGN_BEGINNING, false, false, 2, 1));
         }
@@ -200,6 +197,9 @@ public class PrefPageDrivers extends AbstractPrefPage implements IWorkbenchPrefe
     protected void performDefaults() {
         DBPPreferenceStore store = DBWorkbench.getPlatform().getPreferenceStore();
         versionUpdateCheck.setSelection(store.getDefaultBoolean(ModelPreferences.UI_DRIVERS_VERSION_UPDATE));
+        if (showCommercialDrivers != null) {
+            showCommercialDrivers.setSelection(store.getDefaultBoolean(UIPreferences.DRIVER_SELECTOR_SHOW_COMMERCIAL_DRIVERS));
+        }
 
         proxyHostText.setText(store.getDefaultString(ModelPreferences.UI_PROXY_HOST));
         proxyPortSpinner.setSelection(store.getDefaultInt(ModelPreferences.UI_PROXY_PORT));
@@ -225,6 +225,9 @@ public class PrefPageDrivers extends AbstractPrefPage implements IWorkbenchPrefe
 
         DBPPreferenceStore store = DBWorkbench.getPlatform().getPreferenceStore();
         store.setValue(ModelPreferences.UI_DRIVERS_VERSION_UPDATE, versionUpdateCheck.getSelection());
+        if (showCommercialDrivers != null) {
+            store.setValue(UIPreferences.DRIVER_SELECTOR_SHOW_COMMERCIAL_DRIVERS, showCommercialDrivers.getSelection());
+        }
         store.setValue(ModelPreferences.UI_PROXY_HOST, proxyHostText.getText());
         store.setValue(ModelPreferences.UI_PROXY_PORT, proxyPortSpinner.getSelection());
         store.setValue(ModelPreferences.UI_DRIVERS_HOME, customDriversHome.getText());

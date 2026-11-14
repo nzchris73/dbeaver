@@ -18,6 +18,7 @@ package org.jkiss.dbeaver.ext.postgresql.model;
 
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.ModelPreferences;
 import org.jkiss.dbeaver.ext.postgresql.PostgreConstants;
 import org.jkiss.dbeaver.ext.postgresql.internal.PostgreSQLMessages;
 import org.jkiss.dbeaver.ext.postgresql.model.data.PostgreBinaryFormatter;
@@ -30,9 +31,14 @@ import org.jkiss.dbeaver.model.exec.jdbc.JDBCSession;
 import org.jkiss.dbeaver.model.impl.jdbc.JDBCDataSource;
 import org.jkiss.dbeaver.model.impl.jdbc.JDBCSQLDialect;
 import org.jkiss.dbeaver.model.impl.sql.BasicSQLDialect;
+import org.jkiss.dbeaver.model.preferences.DBPPreferenceStore;
+import org.jkiss.dbeaver.model.sql.SQLDialectFeatures;
 import org.jkiss.dbeaver.model.sql.*;
 import org.jkiss.dbeaver.model.sql.parser.rules.SQLDollarQuoteRule;
 import org.jkiss.dbeaver.model.struct.*;
+import org.jkiss.dbeaver.model.struct.rdb.DBSProcedure;
+import org.jkiss.dbeaver.model.struct.rdb.DBSProcedureParameter;
+import org.jkiss.dbeaver.model.struct.rdb.DBSProcedureType;
 import org.jkiss.dbeaver.model.text.parser.TPRule;
 import org.jkiss.dbeaver.model.text.parser.TPRuleProvider;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
@@ -40,16 +46,79 @@ import org.jkiss.utils.ArrayUtils;
 import org.jkiss.utils.CommonUtils;
 
 import java.sql.Types;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.EnumSet;
-import java.util.Locale;
+import java.util.*;
 
 /**
  * PostgreSQL dialect
  */
 public class PostgreDialect extends JDBCSQLDialect implements TPRuleProvider, SQLDataTypeConverter,
     SQLDialectDDLExtension, SQLDialectSchemaController {
+    @NotNull
+    @Override
+    public SQLDialectFeatures getDialectFeatures() {
+        return DialectFeatures.INSTANCE;
+    }
+
+    private static class DialectFeatures extends SQLDialectFeatures {
+        static final DialectFeatures INSTANCE = new DialectFeatures();
+
+        @NotNull
+        @Override
+        public TrailingSelectIntoSupport getTrailingSelectIntoSupport() {
+            return TrailingSelectIntoSupport.PROCEDURAL;
+        }
+
+        @Override
+        public boolean areRoutineTableResultColumnsBodyVisible() {
+            return true;
+        }
+
+        @NotNull
+        @Override
+        public Set<String> getSignatureModifierKeywords() {
+            Set<String> keywords = new HashSet<>(super.getSignatureModifierKeywords());
+            keywords.add("VARIADIC");
+            return Set.copyOf(keywords);
+        }
+
+        /** PL/pgSQL nested blocks can shadow declarations in an enclosing block.
+         *
+         * @see <a href="https://www.postgresql.org/docs/current/plpgsql-structure.html">PL/pgSQL structure</a>
+         */
+        @NotNull
+        @Override
+        public LocalVariableShadowing getLocalVariableShadowing(@NotNull LocalVariableKind kind) {
+            return LocalVariableShadowing.ALLOW_OUTER;
+        }
+
+        @Override
+        public EnumSet<ProjectionAliasVisibilityScope> getProjectionAliasVisibilityScope() {
+            return EnumSet.of(
+                ProjectionAliasVisibilityScope.GROUP_BY,
+                ProjectionAliasVisibilityScope.ORDER_BY
+            );
+        }
+
+        @NotNull
+        @Override
+        public GlobalVariableInfo[] getGlobalVariables() {
+            return new GlobalVariableInfo[]{
+                new GlobalVariableInfo("current_date", PostgreSQLMessages.global_variable_current_date_description, DBPDataKind.DATETIME),
+                new GlobalVariableInfo("current_time", PostgreSQLMessages.global_variable_current_time_description, DBPDataKind.DATETIME),
+                new GlobalVariableInfo("current_timestamp", PostgreSQLMessages.global_variable_current_timestamp_description, DBPDataKind.DATETIME),
+                new GlobalVariableInfo("localtime", PostgreSQLMessages.global_variable_localtime_description, DBPDataKind.DATETIME),
+                new GlobalVariableInfo("localtimestamp", PostgreSQLMessages.global_variable_localtimestamp_description, DBPDataKind.DATETIME),
+                new GlobalVariableInfo("current_role", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("current_user", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("current_catalog ", PostgreSQLMessages.global_variable_current_catalog_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("current_schema", PostgreSQLMessages.global_variable_current_schema_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("session_user", PostgreSQLMessages.global_variable_session_user_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("system_user", PostgreSQLMessages.global_variable_system_user_description, DBPDataKind.STRING),
+                new GlobalVariableInfo("user", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING)
+            };
+        }
+    }
+
     public static final String[] POSTGRE_NON_TRANSACTIONAL_KEYWORDS = ArrayUtils.concatArrays(
         BasicSQLDialect.NON_TRANSACTIONAL_KEYWORDS,
         new String[]{
@@ -69,22 +138,6 @@ public class PostgreDialect extends JDBCSQLDialect implements TPRuleProvider, SQ
 
     private static final String[] EXEC_KEYWORDS = {
         "CALL"
-    };
-
-    //Function without arguments/parameters #8710
-    private static final GlobalVariableInfo[] GLOBAL_VARIABLES = {
-        new GlobalVariableInfo("current_date", PostgreSQLMessages.global_variable_current_date_description, DBPDataKind.DATETIME),
-        new GlobalVariableInfo("current_time", PostgreSQLMessages.global_variable_current_time_description, DBPDataKind.DATETIME),
-        new GlobalVariableInfo("current_timestamp", PostgreSQLMessages.global_variable_current_timestamp_description, DBPDataKind.DATETIME),
-        new GlobalVariableInfo("localtime", PostgreSQLMessages.global_variable_localtime_description, DBPDataKind.DATETIME),
-        new GlobalVariableInfo("localtimestamp", PostgreSQLMessages.global_variable_localtimestamp_description, DBPDataKind.DATETIME),
-        new GlobalVariableInfo("current_role", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("current_user", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("current_catalog ", PostgreSQLMessages.global_variable_current_catalog_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("current_schema", PostgreSQLMessages.global_variable_current_schema_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("session_user", PostgreSQLMessages.global_variable_session_user_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("system_user", PostgreSQLMessages.global_variable_system_user_description, DBPDataKind.STRING),
-        new GlobalVariableInfo("user", PostgreSQLMessages.global_variable_user_description, DBPDataKind.STRING)
     };
 
     public static final String AUTO_INCREMENT_KEYWORD = "AUTO_INCREMENT";
@@ -929,12 +982,6 @@ public class PostgreDialect extends JDBCSQLDialect implements TPRuleProvider, SQ
         return EXEC_KEYWORDS;
     }
 
-    @NotNull
-    @Override
-    public GlobalVariableInfo[] getGlobalVariables() {
-        return GLOBAL_VARIABLES;
-    }
-
     @Override
     public char getStringEscapeCharacter() {
         if (serverExtension != null && serverExtension.supportsBackslashStringEscape()) {
@@ -1278,15 +1325,100 @@ public class PostgreDialect extends JDBCSQLDialect implements TPRuleProvider, SQ
     }
 
     @Override
-    public EnumSet<ProjectionAliasVisibilityScope> getProjectionAliasVisibilityScope() {
-        return EnumSet.of(
-            ProjectionAliasVisibilityScope.GROUP_BY,
-            ProjectionAliasVisibilityScope.ORDER_BY
-        );
+    protected String getStoredProcedureCallInitialClause(DBSProcedure proc) {
+        String[] executeKeywords = getExecuteKeywords();
+        String qualifiedName = proc.getFullyQualifiedName(DBPEvaluationContext.DML);
+        if (proc.getProcedureType() == DBSProcedureType.FUNCTION || ArrayUtils.isEmpty(executeKeywords)) {
+            return SQLConstants.KEYWORD_SELECT + " * FROM " + qualifiedName;
+        } else {
+            return executeKeywords[0] + " " + qualifiedName;
+        }
     }
 
     @Override
     public boolean isEscapeBackslash() {
         return serverExtension != null && serverExtension.supportsBackslashStringEscape();
+    }
+
+    @Override
+    public void generateStoredProcedureCall(
+            StringBuilder sql,
+            DBSProcedure proc,
+            Collection<? extends DBSProcedureParameter> parameters,
+            boolean castParams
+    ) {
+        DBPPreferenceStore prefStore;
+        DBPDataSource dataSource = proc.getDataSource();
+        if (dataSource != null) {
+            prefStore = dataSource.getContainer().getPreferenceStore();
+        } else {
+            prefStore = DBWorkbench.getPlatform().getPreferenceStore();
+        }
+        String namedParameterPrefix = prefStore.getString(ModelPreferences.SQL_NAMED_PARAMETERS_PREFIX);
+        boolean useBrackets = useBracketsForExec(proc);
+        if (useBrackets) {
+            sql.append("{ ");
+        }
+        sql.append(getStoredProcedureCallInitialClause(proc)).append("(");
+
+        List<DBSProcedureParameter> inParameters = new ArrayList<>();
+        if (parameters != null) {
+            inParameters.addAll(parameters);
+        }
+        if (!inParameters.isEmpty()) {
+            boolean isProcedure = DBSProcedureType.PROCEDURE.equals(proc.getProcedureType());
+            processParameters(sql, castParams, inParameters, namedParameterPrefix, isProcedure);
+        }
+
+        sql.append(")");
+        String callEndClause = getProcedureCallEndClause(proc);
+        if (!CommonUtils.isEmpty(callEndClause)) {
+            sql.append(" ").append(callEndClause);
+        }
+        if (!useBrackets) {
+            sql.append(";");
+        } else {
+            sql.append(" }");
+        }
+        sql.append("\n\n");
+    }
+
+    private void processParameters(StringBuilder sql, boolean castParams, List<DBSProcedureParameter> inParameters,
+                                   String namedParameterPrefix, boolean isProcedure) {
+        StringJoiner parametersJoiner = new StringJoiner(", ");
+
+        for (DBSProcedureParameter parameter : inParameters) {
+            String typeName = parameter.getParameterType().getFullTypeName();
+            switch (parameter.getParameterKind()) {
+                case INOUT:
+                case IN:
+                    if (castParams) {
+                        parametersJoiner.add("cast(" + namedParameterPrefix + CommonUtils.escapeIdentifier(parameter.getName())
+                                + " as " + typeName + ")");
+                    } else {
+                        parametersJoiner.add(namedParameterPrefix + CommonUtils.escapeIdentifier(parameter.getName()));
+                    }
+                    break;
+                case OUT:
+                    // PostgreSQL requires OUT parameters to be passed as NULL in procedure calls
+                    if (isProcedure) {
+                        parametersJoiner.add(SQLConstants.NULL_VALUE);
+                    }
+                    break;
+                case RETURN:
+                    continue;
+                default:
+                    if (isStoredProcedureCallIncludesOutParameters()) {
+                        if (castParams) {
+                            parametersJoiner.add("cast(? as " + typeName + ")");
+                        } else {
+                            parametersJoiner.add("?");
+                        }
+                    }
+                    break;
+            }
+        }
+
+        sql.append(parametersJoiner);
     }
 }

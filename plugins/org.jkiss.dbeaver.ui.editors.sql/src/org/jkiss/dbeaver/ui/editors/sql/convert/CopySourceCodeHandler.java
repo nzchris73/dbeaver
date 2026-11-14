@@ -27,18 +27,17 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.dnd.TextTransfer;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.*;
 import org.eclipse.ui.commands.IElementUpdater;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.eclipse.ui.internal.WorkbenchMessages;
 import org.eclipse.ui.menus.UIElement;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
-import org.jkiss.dbeaver.model.messages.ModelMessages;
 import org.jkiss.dbeaver.model.preferences.DBPPropertyDescriptor;
 import org.jkiss.dbeaver.model.sql.SQLScriptElement;
 import org.jkiss.dbeaver.runtime.properties.PropertySourceCustom;
@@ -139,9 +138,7 @@ public class CopySourceCodeHandler extends AbstractHandler implements IElementUp
             ((GridLayout)composite.getLayout()).numColumns = 2;
 
             {
-                final SelectionAdapter formatChangeListener = new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
+                final SelectionListener formatChangeListener = SelectionListener.widgetSelectedAdapter(e -> {
                         if (((Button)e.widget).getSelection()) {
                             if (curFormat == e.widget.getData()) {
                                 return;
@@ -151,8 +148,7 @@ public class CopySourceCodeHandler extends AbstractHandler implements IElementUp
                             loadOptions();
                             onFormatChange();
                         }
-                    }
-                };
+                    });
 
                 Composite formatPanel = UIUtils.createPlaceholder(composite, 1);
                 GridData gd = new GridData(GridData.FILL_BOTH);
@@ -202,7 +198,7 @@ public class CopySourceCodeHandler extends AbstractHandler implements IElementUp
                 createSQLPanel(sash);
                 Composite targetGroup = UIUtils.createPlaceholder(sash, 1, 5);
                 targetGroup.setLayoutData(new GridData(GridData.FILL_BOTH));
-                UIUtils.createControlLabel(targetGroup, ModelMessages.controls_querylog_column_result_name);
+                UIUtils.createControlLabel(targetGroup, SQLEditorMessages.controls_querylog_column_result_name);
                 targetText = new StyledText(targetGroup, SWT.BORDER | SWT.READ_ONLY | SWT.V_SCROLL | SWT.WRAP);
                 targetText.setLayoutData(new GridData(GridData.FILL_BOTH));
                 targetText.setFont(UIUtils.getMonospaceFont());
@@ -277,7 +273,7 @@ public class CopySourceCodeHandler extends AbstractHandler implements IElementUp
             super.createButtonsForButtonBar(parent);
             Button okButton = getButton(IDialogConstants.OK_ID);
             if (okButton != null) {
-                okButton.setText(SQLEditorMessages.dialog_view_sql_button_copy);
+                okButton.setText(WorkbenchMessages.Workbench_copy);
             }
         }
 

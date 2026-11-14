@@ -106,13 +106,13 @@ public abstract class SQLEditorNested<T extends DBSObject>
     }
 
     @Override
-    public void createPartControl(Composite parent) {
+    public void createPartControl(@NotNull Composite parent) {
         pageControl = new EditorPageControl(parent, SWT.SHEET);
 
         boolean hasCompiler = getCompileCommandId() != null;
 
         if (hasCompiler) {
-            editorSash = new SashForm(pageControl.createContentContainer(), UIUtils.checkSashStyle(SWT.VERTICAL | SWT.SMOOTH));
+            editorSash = new SashForm(pageControl.createContentContainer(), SWT.VERTICAL | SWT.SMOOTH);
             super.createPartControl(editorSash);
 
             editorControl = editorSash.getChildren()[0];
@@ -272,7 +272,7 @@ public abstract class SQLEditorNested<T extends DBSObject>
     }
 
     @Override
-    public void editorContextMenuAboutToShow(IMenuManager menu) {
+    public void editorContextMenuAboutToShow(@NotNull IMenuManager menu) {
         super.editorContextMenuAboutToShow(menu);
         menu.add(new Separator());
         contributeEditorCommands(menu);

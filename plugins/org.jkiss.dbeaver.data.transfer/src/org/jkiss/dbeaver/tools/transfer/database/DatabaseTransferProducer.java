@@ -49,6 +49,7 @@ import org.jkiss.dbeaver.tools.transfer.IDataTransferProducer;
 import org.jkiss.dbeaver.tools.transfer.internal.DTMessages;
 import org.jkiss.dbeaver.tools.transfer.serialize.DTObjectSerializer;
 import org.jkiss.dbeaver.tools.transfer.serialize.SerializerContext;
+import org.jkiss.dbeaver.tools.transfer.stream.StreamTransferConsumer;
 import org.jkiss.dbeaver.utils.GeneralUtils;
 import org.jkiss.utils.CommonUtils;
 
@@ -182,8 +183,9 @@ public class DatabaseTransferProducer implements IDataTransferProducer<DatabaseP
         @NotNull IDataTransferConsumer consumer,
         @Nullable IDataTransferProcessor processor,
         @NotNull DatabaseProducerSettings settings,
-        @Nullable DBTTask task)
-            throws DBException {
+        @Nullable DBTTask task,
+        long maxRows
+    ) throws DBException {
         String contextTask = DTMessages.data_transfer_wizard_job_task_export;
 
         DBSDataContainer databaseObject = getDatabaseObject();
@@ -211,9 +213,15 @@ public class DatabaseTransferProducer implements IDataTransferProducer<DatabaseP
 
             boolean newConnection = settings.isOpenNewConnections() && !getDatabaseObject().getDataSource().getContainer().getDriver()
                 .isEmbedded();
-            boolean forceDataReadTransactions
+            final boolean forceDataReadTransactions
                 = Boolean.TRUE.equals(dataSource.getDataSourceFeature(DBPDataSource.FEATURE_LOB_REQUIRE_TRANSACTIONS));
             boolean selectiveExportFromUI = useFetchedRows != null;
+            final boolean extractInSegments = useFetchedRows == null &&
+                settings.getExtractType() == DatabaseProducerSettings.ExtractType.SEGMENTS;
+            final boolean prepareColumnMetadata = !selectiveExportFromUI && settings.getFetchSize() > 0
+                && consumer instanceof StreamTransferConsumer
+                && Boolean.TRUE.equals(dataSource.getDataSourceFeature(
+                    DBPDataSource.FEATURE_JDBC_TABLE_READ_REQUIRES_PREPARED_COLUMN_METADATA));
 
             DBCExecutionContext context;
             if (dataContainer instanceof DBPContextProvider contextProvider) {
@@ -284,10 +292,20 @@ public class DatabaseTransferProducer implements IDataTransferProducer<DatabaseP
                         monitor.subTask("Read data");
 
                         // Perform export
-                        if (settings.getExtractType() == DatabaseProducerSettings.ExtractType.SINGLE_QUERY) {
+                        if (!extractInSegments) {
                             checkCanceled(monitor);
                             // Just do it in single query
-                            producerStatistics.accumulate(dataContainer.readData(transferSource, session, consumer, dataFilter, -1, -1, readFlags, settings.getFetchSize()));
+                            producerStatistics.accumulate(dataContainer.readData(
+                                transferSource,
+                                session,
+                                consumer,
+                                dataFilter,
+                                -1,
+                                maxRows,
+                                readFlags,
+                                settings.getFetchSize(),
+                                prepareColumnMetadata
+                            ));
                             checkCanceled(monitor);
                         } else {
                             // Read all data by segments
@@ -296,7 +314,8 @@ public class DatabaseTransferProducer implements IDataTransferProducer<DatabaseP
                             for (; ; ) {
                                 checkCanceled(monitor);
                                 DBCStatistics statistics = dataContainer.readData(
-                                    transferSource, session, consumer, dataFilter, offset, segmentSize, readFlags, settings.getFetchSize());
+                                    transferSource, session, consumer, dataFilter, offset, segmentSize, readFlags,
+                                    settings.getFetchSize(), prepareColumnMetadata);
                                 checkCanceled(monitor);
                                 if (statistics.getRowsFetched() < segmentSize) {
                                     // Done

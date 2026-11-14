@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,8 @@ import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.ext.clickhouse.ClickhouseDataTypesParser.ArrayTypeContext;
 import org.jkiss.dbeaver.ext.clickhouse.ClickhouseDataTypesParser.MapTypeContext;
 import org.jkiss.dbeaver.ext.clickhouse.ClickhouseDataTypesParser.TupleTypeContext;
-import org.jkiss.dbeaver.ext.clickhouse.model.ClickhouseArrayType;
-import org.jkiss.dbeaver.ext.clickhouse.model.ClickhouseDataSource;
-import org.jkiss.dbeaver.ext.clickhouse.model.ClickhouseMapType;
-import org.jkiss.dbeaver.ext.clickhouse.model.ClickhouseTupleType;
+import org.jkiss.dbeaver.ext.clickhouse.model.*;
+import org.jkiss.dbeaver.ext.clickhouse.model.data.ClickhouseArrayValueHandler;
 import org.jkiss.dbeaver.ext.clickhouse.model.data.ClickhouseMapValue;
 import org.jkiss.dbeaver.ext.clickhouse.model.data.ClickhouseTupleValue;
 import org.jkiss.dbeaver.model.DBUtils;
@@ -37,6 +35,7 @@ import org.jkiss.dbeaver.model.data.json.JSONUtils;
 import org.jkiss.dbeaver.model.exec.DBCSession;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.struct.DBSDataType;
+import org.jkiss.dbeaver.model.struct.DBSEntity;
 import org.jkiss.dbeaver.model.struct.DBSTypedObject;
 import org.jkiss.utils.CommonUtils;
 import org.jkiss.utils.Pair;
@@ -61,7 +60,9 @@ public class ClickhouseTypeParser {
         return ENABLE_COMPLEX_TYPE_PARSING && (
             typeName.startsWith(ClickhouseConstants.DATA_TYPE_MAP) ||
                 typeName.startsWith(ClickhouseConstants.DATA_TYPE_TUPLE) ||
-                typeName.startsWith(ClickhouseConstants.DATA_TYPE_ARRAY)
+                typeName.startsWith(ClickhouseConstants.DATA_TYPE_ARRAY) ||
+                typeName.startsWith(ClickhouseConstants.DATA_TYPE_NULLABLE) ||
+                typeName.startsWith(ClickhouseConstants.DATA_TYPE_LOW_CARDINALITY)
             );
     }
 
@@ -82,14 +83,32 @@ public class ClickhouseTypeParser {
             return null;
         }
 
-        if (type instanceof ClickhouseMapType map && ENABLE_COMPLEX_TYPE_PARSING) {
-            return new ClickhouseMapValue((ClickhouseDataSource) session.getDataSource(), map, ((Map<?, ?>) object));
+        if (type instanceof ClickhouseMapType mapType && ENABLE_COMPLEX_TYPE_PARSING) {
+            if (object instanceof ClickhouseMapValue) {
+                return object;
+            }
+            Map<Object, Object> entries = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) object).entrySet()) {
+                entries.put(
+                    makeValue(session, mapType.getKeyType(), entry.getKey()),
+                    makeValue(session, mapType.getValueType(), entry.getValue())
+                );
+            }
+            return new ClickhouseMapValue(
+                (ClickhouseDataSource) session.getDataSource(),
+                mapType,
+                Objects.requireNonNull(mapType.getAttributes(session.getProgressMonitor())),
+                entries
+            );
         } else if (type instanceof ClickhouseTupleType tuple && ENABLE_COMPLEX_TYPE_PARSING) {
+            if (object instanceof ClickhouseTupleValue) {
+                return object;
+            }
             final Object[] values;
             if (object instanceof Map) {
                 values = ((Map<?, ?>) object).entrySet().stream()
                     .flatMap(e -> Stream.of(e.getKey(), e.getValue())).toArray();
-            } else if (object instanceof String) { 
+            } else if (object instanceof String) {
                 values = JSONUtils.parseMap(gson, new StringReader((String) object)).entrySet().stream()
                     .flatMap(e -> Stream.of(e.getKey(), e.getValue())).toArray();
             } else if (object instanceof Object[] array) {
@@ -103,6 +122,8 @@ public class ClickhouseTypeParser {
             }
 
             return new ClickhouseTupleValue(session.getProgressMonitor(), tuple, values);
+        } else if (type instanceof ClickhouseArrayType arrayType) {
+            return ClickhouseArrayValueHandler.INSTANCE.getValueFromObject(session, arrayType, object, false, false);
         } else {
             return object;
         }
@@ -181,7 +202,9 @@ public class ClickhouseTypeParser {
             return null;
         }
 
-        return new ClickhouseArrayType(dataSource, componentType);
+        return componentType instanceof DBSEntity
+            ? new ClickhouseTuplesArrayType(dataSource, componentType)
+            : new ClickhouseArrayType(dataSource, componentType);
     }
 
     @Nullable
@@ -247,12 +270,25 @@ public class ClickhouseTypeParser {
 
     @NotNull
     public static String getTypeNameWithoutModifiers(@NotNull String fullTypeName) {
-        final int div = fullTypeName.indexOf('(');
-        if (div < 0) {
-            return fullTypeName;
-        } else {
-            return fullTypeName.substring(0, div);
+        String typeName = fullTypeName.trim();
+        while (true) {
+            final int div = typeName.indexOf('(');
+            if (div < 0) {
+                return typeName;
+            }
+
+            final String baseTypeName = typeName.substring(0, div).trim();
+            if (isMarkerType(baseTypeName) && typeName.endsWith(")")) {
+                typeName = typeName.substring(div + 1, typeName.length() - 1).trim();
+            } else {
+                return baseTypeName;
+            }
         }
+    }
+
+    private static boolean isMarkerType(@NotNull String typeName) {
+        return ClickhouseConstants.DATA_TYPE_NULLABLE.equals(typeName) ||
+            ClickhouseConstants.DATA_TYPE_LOW_CARDINALITY.equals(typeName);
     }
 
     private static boolean isEnum(@NotNull String type) {

@@ -21,13 +21,11 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.events.MouseAdapter;
 import org.eclipse.swt.events.MouseEvent;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.*;
 import org.jkiss.code.Nullable;
-import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.DBPDataSource;
 import org.jkiss.dbeaver.model.DBUtils;
 import org.jkiss.dbeaver.model.app.DBPPlatform;
@@ -62,8 +60,6 @@ public class SearchMetadataPage extends AbstractSearchPage {
     private static final String PROP_SHOW_CONNECTED = "search.metadata.show-connected-only"; //$NON-NLS-1$
     private static final String PROP_SEARCH_IN_COMMENTS = "search.metadata.search-in-comments"; //$NON-NLS-1$
     private static final String PROP_SEARCH_IN_DEFINITIONS = "search.metadata.search-in-definitions"; //$NON-NLS-1$
-
-    private static final boolean CONNECT_ON_CLICK = true;
 
     private Table typesTable;
     private Combo searchText;
@@ -164,35 +160,43 @@ public class SearchMetadataPage extends AbstractSearchPage {
                     return false;
                 }
             });
-            treeViewer.addSelectionChangedListener(
-                event -> {
+            treeViewer.addSelectionChangedListener(event -> fillObjectTypes());
+            // The navigator starts loading/connecting when a connection is expanded. Listen for its
+            // completion rather than starting a second connect job (which may be canceled as a duplicate).
+            INavigatorListener connectionListener = event -> {
+                if (event.getAction() == DBNEvent.Action.UPDATE &&
+                    (event.getNodeChange() == DBNEvent.NodeChange.AFTER_LOAD ||
+                        event.getNodeChange() == DBNEvent.NodeChange.LOAD) &&
+                    event.getNode() instanceof DBNDataSource dsNode &&
+                    dsNode.getDataSource() != null &&
+                    DBNDataSource.getDataSourceNode(getSelectedNode()) == dsNode)
+                {
                     fillObjectTypes();
-                    updateEnablement();
-                    IStructuredSelection structSel = (IStructuredSelection) event.getSelection();
-                    Object object = structSel.isEmpty() ? null : structSel.getFirstElement();
-                    if (object instanceof DBNNode) {
-                        for (DBNNode node = (DBNNode)object; node != null; node = node.getParentNode()) {
-                            if (node instanceof DBNDataSource dsNode && CONNECT_ON_CLICK) {
-                                try {
-                                    dsNode.initializeNode(null, status -> {
-                                        if (status.isOK()) {
-                                            UIUtils.asyncExec(() -> {
-                                                if (!dataSourceTree.isDisposed()) {
-                                                    fillObjectTypes();
-                                                }
-                                            });
-                                        }
-                                    });
-                                } catch (DBException e) {
-                                    // shouldn't be here
-                                    log.error(e);
-                                }
-                                break;
-                            }
-                        }
+                }
+            };
+            platform.getNavigatorModel().addListener(connectionListener);
+            dataSourceTree.addDisposeListener(e -> platform.getNavigatorModel().removeListener(connectionListener));
+            treeViewer.addTreeListener(new ITreeViewerListener() {
+                @Override
+                public void treeExpanded(TreeExpansionEvent event) {
+                    if (!(event.getElement() instanceof DBNDataSource dsNode)) {
+                        return;
+                    }
+                    // The chevron doesn't necessarily select the connection. Preserve a selected child,
+                    // since it determines the scope of the search.
+                    if (DBNDataSource.getDataSourceNode(getSelectedNode()) != dsNode) {
+                        treeViewer.setSelection(new StructuredSelection(dsNode));
+                    }
+                    if (dsNode.getDataSource() != null) {
+                        fillObjectTypes();
                     }
                 }
-            );
+
+                @Override
+                public void treeCollapsed(TreeExpansionEvent event) {
+                    // No action on collapse.
+                }
+            });
 
             treeViewer.addDoubleClickListener(event -> {
                 IStructuredSelection selection = (IStructuredSelection) treeViewer.getSelection();
@@ -206,14 +210,11 @@ public class SearchMetadataPage extends AbstractSearchPage {
             final Button showConnectedCheck = new Button(sourceGroup, SWT.CHECK);
             showConnectedCheck.setText(UINavigatorMessages.label_show_connected);
             showConnectedCheck.setSelection(showConnected);
-            showConnectedCheck.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
+            showConnectedCheck.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                     showConnected = showConnectedCheck.getSelection();
                     treeViewer.refresh();
                     DBWorkbench.getPlatform().getPreferenceStore().setValue(PROP_SHOW_CONNECTED, showConnected);
-                }
-            });
+                }));
         }
 
         {
@@ -235,13 +236,8 @@ public class SearchMetadataPage extends AbstractSearchPage {
                 if (matchTypeIndex >= 0) {
                     matchCombo.select(matchTypeIndex);
                 }
-                matchCombo.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e)
-                    {
-                        matchTypeIndex = matchCombo.getSelectionIndex();
-                    }
-                });
+                matchCombo.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                    matchTypeIndex = matchCombo.getSelectionIndex()));
                 matchCombo.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING));
 
                 if (maxResults <= 0) {
@@ -254,21 +250,12 @@ public class SearchMetadataPage extends AbstractSearchPage {
                 maxResultsSpinner.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING));
 
                 Button caseCheckbox = UIUtils.createCheckbox(settingsGroup, UISearchMessages.dialog_search_objects_case_sensitive, null, caseSensitive, 2);
-                caseCheckbox.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e)
-                    {
-                        caseSensitive = caseCheckbox.getSelection();
-                    }
-                });
+                caseCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                    caseSensitive = caseCheckbox.getSelection()));
 
                 searchInCommentsCheckbox = UIUtils.createCheckbox(settingsGroup, UISearchMessages.dialog_search_objects_search_in_comments, null, searchInComments, 2);
-                searchInCommentsCheckbox.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
-                        searchInComments = searchInCommentsCheckbox.getSelection();
-                    }
-                });
+                searchInCommentsCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                    searchInComments = searchInCommentsCheckbox.getSelection()));
                 searchInCommentsCheckbox.setEnabled(false);
 
                 searchInDefinitionsCheckbox = UIUtils.createCheckbox(
@@ -278,12 +265,8 @@ public class SearchMetadataPage extends AbstractSearchPage {
                     searchInDefinitions,
                     2
                 );
-                searchInDefinitionsCheckbox.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
-                        searchInDefinitions = searchInDefinitionsCheckbox.getSelection();
-                    }
-                });
+                searchInDefinitionsCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                    searchInDefinitions = searchInDefinitionsCheckbox.getSelection()));
                 searchInDefinitionsCheckbox.setEnabled(false);
             }
 
@@ -291,10 +274,7 @@ public class SearchMetadataPage extends AbstractSearchPage {
             otLabel.setLayoutData(new GridData(GridData.VERTICAL_ALIGN_BEGINNING));
 
             typesTable = new Table(settingsGroup, SWT.CHECK | SWT.H_SCROLL | SWT.V_SCROLL | SWT.FULL_SELECTION);
-            typesTable.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e)
-                {
+            typesTable.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                     //checkedTypes.clear();
                     for (TableItem item : typesTable.getItems()) {
                         DBSObjectType objectType = (DBSObjectType) item.getData();
@@ -306,8 +286,7 @@ public class SearchMetadataPage extends AbstractSearchPage {
                     }
                     updateEnablement();
                     updateSearchOptionsCheckboxes();
-                }
-            });
+                }));
             typesTable.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseDoubleClick(MouseEvent e) {

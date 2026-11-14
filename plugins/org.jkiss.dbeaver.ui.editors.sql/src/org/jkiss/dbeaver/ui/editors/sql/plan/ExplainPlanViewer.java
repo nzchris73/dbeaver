@@ -68,14 +68,14 @@ import org.jkiss.dbeaver.ui.editors.sql.internal.SQLEditorMessages;
 import org.jkiss.dbeaver.ui.editors.sql.plan.registry.SQLPlanActionDescriptor;
 import org.jkiss.dbeaver.ui.editors.sql.plan.registry.SQLPlanViewDescriptor;
 import org.jkiss.dbeaver.ui.editors.sql.plan.registry.SQLPlanViewRegistry;
-import org.jkiss.dbeaver.ui.internal.UIMessages;
 import org.jkiss.dbeaver.utils.GeneralUtils;
 import org.jkiss.utils.CommonUtils;
 
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -281,7 +281,7 @@ public class ExplainPlanViewer extends Viewer implements IAdaptable {
         if (planner instanceof DBCQueryPlannerSerializable qps) {
 
             FileDialog fd = new FileDialog(viewer.getControl().getShell(), SWT.OPEN | SWT.SINGLE);
-            fd.setText(UIMessages.save_execution_plan);
+            fd.setText(SQLEditorMessages.save_execution_plan);
             fd.setFilterPath(curFolder);
             fd.setFilterExtensions(SQLPlanSaveProvider.EXT);
             String selected = fd.open();
@@ -289,7 +289,7 @@ public class ExplainPlanViewer extends Viewer implements IAdaptable {
 
                 curFolder = fd.getFilterPath();
 
-                try (Reader r = new FileReader(selected)) {
+                try (Reader r = Files.newBufferedReader(Path.of(selected))) {
                     lastPlan = qps.deserialize(r);
                     lastQuery = new SQLQuery(
                         contextProvider.getExecutionContext().getDataSource(),

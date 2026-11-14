@@ -20,8 +20,10 @@ import org.eclipse.jface.dialogs.IDialogPage;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
-import org.eclipse.swt.events.*;
-import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.events.ModifyEvent;
+import org.eclipse.swt.events.ModifyListener;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Combo;
@@ -41,14 +43,12 @@ import org.jkiss.dbeaver.model.DBConstants;
 import org.jkiss.dbeaver.model.DBPDataSourceContainer;
 import org.jkiss.dbeaver.model.connection.DBPConnectionConfiguration;
 import org.jkiss.dbeaver.model.connection.DBPDriverConfigurationType;
-import org.jkiss.dbeaver.registry.DBConnectionConstants;
-import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.IDialogPageProvider;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.controls.TextWithOpenFolder;
-import org.jkiss.dbeaver.ui.dialogs.connection.ClientHomesSelector;
 import org.jkiss.dbeaver.ui.dialogs.connection.ConnectionPageWithAuth;
 import org.jkiss.dbeaver.ui.dialogs.connection.DriverPropertiesDialogPage;
+import org.jkiss.dbeaver.ui.internal.UIConnectionMessages;
 import org.jkiss.utils.CommonUtils;
 
 import java.io.File;
@@ -67,36 +67,18 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
     private Combo sidServiceCombo;
     private Combo serviceNameCombo;
     private Combo tnsNameCombo;
-	private CTabFolder connectionTypeFolder;
-    private ClientHomesSelector oraHomeSelector;
+    private CTabFolder connectionTypeFolder;
     private Text connectionUrlText;
 
     private ControlsListener controlModifyListener;
-    private OracleConstants.ConnectionType connectionType = OracleConstants.ConnectionType.BASIC;
+    private String connectionType = OracleConstants.ConnectionType.BASIC;
 
     private TextWithOpenFolder tnsPathText;
 
     private boolean activated = false;
-    private final Image logoImage;
-
-    public OracleConnectionPage() {
-        logoImage = createImage("icons/oracle_logo.png"); //$NON-NLS-1
-    }
 
     @Override
-    public void dispose()
-    {
-        super.dispose();
-        UIUtils.dispose(logoImage);
-    }
-
-    @Override
-    public Image getImage() {
-        return logoImage;
-    }
-
-    @Override
-    public void createControl(Composite composite)
+    public void createControl(@NotNull Composite composite)
     {
         controlModifyListener = new ControlsListener();
 
@@ -104,34 +86,27 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         addrGroup.setLayout(new GridLayout(1, false));
         addrGroup.setLayoutData(new GridData(GridData.FILL_BOTH));
 
-        UIUtils.createControlLabel(addrGroup, OracleUIMessages.dialog_connection_connection_type_group);
-
-        connectionTypeFolder = new CTabFolder(addrGroup, SWT.TOP | SWT.MULTI);
+        Composite serverGroup = UIUtils.createTitledComposite(
+            addrGroup,
+            UIConnectionMessages.dialog_connection_server_label,
+            1,
+            GridData.FILL_HORIZONTAL
+        );
+        connectionTypeFolder = new CTabFolder(serverGroup, SWT.TOP | SWT.MULTI);
         connectionTypeFolder.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
 
         createBasicConnectionControls(connectionTypeFolder);
 		createTNSConnectionControls(connectionTypeFolder);
+        createAdditionalConnectionControls(connectionTypeFolder);
         createCustomConnectionControls(connectionTypeFolder);
-        connectionTypeFolder.setSelection(connectionType.ordinal());
-        connectionTypeFolder.addSelectionListener(new SelectionAdapter()
-        {
-            @Override
-            public void widgetSelected(SelectionEvent e)
-            {
-                connectionType = (OracleConstants.ConnectionType) connectionTypeFolder.getSelection().getData();
-                site.getActiveDataSource().getConnectionConfiguration().setProviderProperty(OracleConstants.PROP_CONNECTION_TYPE, connectionType.name());
-                updateUI();
-            }
-        });
+        connectionTypeFolder.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
+            connectionType = (String) connectionTypeFolder.getSelection().getData();
+            site.getActiveDataSource().getConnectionConfiguration()
+                .setProviderProperty(OracleConstants.PROP_CONNECTION_TYPE, connectionType);
+            updateUI();
+        }));
 
         createAuthPanel(addrGroup, 1);
-        Composite bottomControls = UIUtils.createPlaceholder(addrGroup, 3);
-        bottomControls.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-
-        if (DBWorkbench.hasFeature(DBConnectionConstants.PRODUCT_FEATURE_ADVANCED_DATABASE_ADMINISTRATION)) {
-            createClientHomeGroup(bottomControls);
-        }
-
         createDriverPanel(addrGroup);
         setControl(addrGroup);
     }
@@ -210,6 +185,10 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         });
     }
 
+    protected void createAdditionalConnectionControls(@NotNull CTabFolder protocolFolder) {
+        //no implementation
+    }
+
     @NotNull
     private Collection<String> getAvailableServiceNames() {
         String tnsPath = tnsPathText.getText();
@@ -220,7 +199,7 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
             }
             return Collections.emptyList();
         }
-        String oraHome = oraHomeSelector == null ? null : oraHomeSelector.getSelectedHome();
+        String oraHome = site.getActiveDataSource().getConnectionConfiguration().getClientHomeId();
         if (CommonUtils.isEmpty(oraHome)) {
             // check default oraHome before checking tnsAdmin
             File defaultOraHomePath = OCIUtils.getDefaultOraHomePath();
@@ -252,14 +231,13 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
             for (String alias : serviceNames) {
                 tnsNameCombo.add(alias);
             }
-            if (!oldText.isEmpty()) {
-                UIUtils.setComboSelection(tnsNameCombo, oldText);
-            } else if (aliasAmongServiceNames) {
-                UIUtils.setComboSelection(tnsNameCombo, networkAlias);
-            }
-            if (tnsNameCombo.getSelectionIndex() < 0) {
-                tnsNameCombo.select(0);
-            }
+        }
+        if (!oldText.isEmpty()) {
+            tnsNameCombo.setText(oldText);
+        } else if (aliasAmongServiceNames) {
+            UIUtils.setComboSelection(tnsNameCombo, networkAlias);
+        } else if (!serviceNames.isEmpty()) {
+            tnsNameCombo.select(0);
         }
     }
 
@@ -284,20 +262,12 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         connectionUrlText.addModifyListener(controlModifyListener);
     }
 
-    private void createClientHomeGroup(@NotNull Composite bottomControls) {
-        oraHomeSelector = new ClientHomesSelector(bottomControls, OracleUIMessages.dialog_connection_ora_home) {
-            @Override
-            protected void handleHomeChange()
-            {
-                populateTnsNameCombo();
-            }
-        };
-        GridData gd = new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING);
-        gd.widthHint = UIUtils.getFontHeight(bottomControls) * 30;
-        oraHomeSelector.getPanel().setLayoutData(gd);
-
-        Label ph = new Label(bottomControls, SWT.NONE);
-        ph.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+    @Override
+    public void setVisible(boolean visible) {
+        super.setVisible(visible);
+        if (visible && activated) {
+            populateTnsNameCombo();
+        }
     }
 
     @Override
@@ -306,21 +276,22 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         if (!super.isComplete()) {
             return false;
         }
-//        if (isOCI && CommonUtils.isEmpty(oraHomeSelector.getSelectedHome())) {
-//            return false;
-//        }
         return switch (connectionType) {
-            case BASIC -> !CommonUtils.isEmpty(serviceNameCombo.getText());
-            case TNS -> !CommonUtils.isEmpty(tnsNameCombo.getText());
-            case CUSTOM -> !CommonUtils.isEmpty(connectionUrlText.getText());
-            default -> false;
+            case OracleConstants.ConnectionType.BASIC -> !CommonUtils.isEmpty(serviceNameCombo.getText());
+            case OracleConstants.ConnectionType.TNS -> !CommonUtils.isEmpty(tnsNameCombo.getText());
+            case OracleConstants.ConnectionType.CUSTOM -> !CommonUtils.isEmpty(connectionUrlText.getText());
+            default -> isAdditionalTabsComplete();
         };
     }
 
+    protected boolean isAdditionalTabsComplete() {
+        //no implementation
+        return true;
+    }
+
     @Override
-    protected boolean isCustomURL()
-    {
-        return this.connectionType == OracleConstants.ConnectionType.CUSTOM;
+    protected boolean isCustomURL() {
+        return OracleConstants.ConnectionType.CUSTOM.equals(connectionType);
     }
 
     @Override
@@ -335,10 +306,6 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
             sidServiceCombo.setText(OracleConnectionType.valueOf(sidService).getTitle());
         }
 
-        if (oraHomeSelector != null) {
-            oraHomeSelector.populateHomes(site.getDriver(), connectionInfo.getClientHomeId(), site.isNew());
-        }
-
         if (tnsNameCombo.getItemCount() == 0) {
             UIUtils.asyncExec(this::populateTnsNameCombo);
         }
@@ -351,13 +318,10 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
             });
         }
 
-        String conTypeProperty = connectionInfo.getProviderProperty(OracleConstants.PROP_CONNECTION_TYPE);
-        if (conTypeProperty != null) {
-            connectionType = OracleConstants.ConnectionType.valueOf(CommonUtils.toString(conTypeProperty));
-        } else {
-            connectionType = OracleConstants.ConnectionType.BASIC;
-        }
-        connectionTypeFolder.setSelection(connectionType.ordinal());
+        connectionType = OracleConstants.ConnectionType.fromString(
+            connectionInfo.getProviderProperty(OracleConstants.PROP_CONNECTION_TYPE)
+        );
+        selectConnectionTypeTab();
         if (site.isNew() && CommonUtils.isEmpty(connectionInfo.getDatabaseName())) {
             hostText.setText(DBConstants.HOST_LOCALHOST);
         } else {
@@ -373,15 +337,24 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         } else {
             serviceNameCombo.setText(CommonUtils.notEmpty(connectionInfo.getDatabaseName()));
         }
-        if (connectionType == OracleConstants.ConnectionType.TNS) {
+        if (OracleConstants.ConnectionType.TNS.equals(connectionType)) {
             tnsNameCombo.setText(CommonUtils.notEmpty(connectionInfo.getDatabaseName()));
             String tnsPathProperty = connectionInfo.getProviderProperty(OracleConstants.PROP_TNS_PATH);
             if (tnsPathProperty != null) {
                 tnsPathText.setText(tnsPathProperty);
             }
         }
+        loadAdditionalSettings(site.getActiveDataSource(), connectionInfo);
         connectionUrlText.setText(CommonUtils.notEmpty(connectionInfo.getUrl()));
         activated = true;
+        updateUI();
+    }
+
+    protected void loadAdditionalSettings(
+        @NotNull DBPDataSourceContainer dataSource,
+        @NotNull DBPConnectionConfiguration connectionInfo
+    ) {
+        //no implementation
     }
 
     @NotNull
@@ -397,29 +370,28 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
     @Override
     public void saveSettings(@NotNull DBPDataSourceContainer dataSource) {
         DBPConnectionConfiguration connectionInfo = dataSource.getConnectionConfiguration();
-        if (oraHomeSelector != null) {
-            connectionInfo.setClientHomeId(oraHomeSelector.getSelectedHome());
-        }
-
-        connectionInfo.setProviderProperty(OracleConstants.PROP_CONNECTION_TYPE, connectionType.name());
+        connectionInfo.setProviderProperty(OracleConstants.PROP_CONNECTION_TYPE, connectionType);
         switch (connectionType) {
-            case BASIC:
+            case OracleConstants.ConnectionType.BASIC:
                 connectionInfo.setHostName(hostText.getText().trim());
                 connectionInfo.setHostPort(portText.getText().trim());
                 connectionInfo.setDatabaseName(serviceNameCombo.getText().trim());
                 connectionInfo.setConfigurationType(DBPDriverConfigurationType.MANUAL);
                 break;
-            case TNS:
+            case OracleConstants.ConnectionType.TNS:
                 connectionInfo.setDatabaseName(tnsNameCombo.getText().trim());
                 connectionInfo.setProviderProperty(OracleConstants.PROP_TNS_PATH, tnsPathText.getText().trim());
                 connectionInfo.setConfigurationType(DBPDriverConfigurationType.MANUAL);
                 break;
-            case CUSTOM:
+            case OracleConstants.ConnectionType.CUSTOM:
                 connectionInfo.setUrl(connectionUrlText.getText().trim());
                 connectionInfo.setHostName(hostText.getText().trim());
                 connectionInfo.setHostPort(portText.getText().trim());
                 connectionInfo.setDatabaseName(serviceNameCombo.getText().trim());
                 connectionInfo.setConfigurationType(DBPDriverConfigurationType.URL);
+                break;
+            default:
+                saveAdditionalSettings(connectionInfo);
                 break;
         }
         connectionInfo.setProviderProperty(OracleConstants.PROP_SID_SERVICE, OracleConnectionType.getTypeForTitle(sidServiceCombo.getText()).name());
@@ -427,10 +399,30 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         super.saveSettings(dataSource);
     }
 
-    private void updateUI() {
+    protected void saveAdditionalSettings(@NotNull DBPConnectionConfiguration connectionInfo) {
+        //no implementation
+    }
+
+    protected void updateUI() {
         if (activated) {
             site.updateButtons();
         }
+    }
+
+    @NotNull
+    protected String getConnectionType() {
+        return connectionType;
+    }
+
+    private void selectConnectionTypeTab() {
+        for (CTabItem item : connectionTypeFolder.getItems()) {
+            if (connectionType.equals(item.getData())) {
+                connectionTypeFolder.setSelection(item);
+                return;
+            }
+        }
+        connectionTypeFolder.setSelection(0);
+        connectionType = (String) connectionTypeFolder.getItem(0).getData();
     }
 
     private class ControlsListener implements ModifyListener, SelectionListener {
@@ -438,10 +430,12 @@ public class OracleConnectionPage extends ConnectionPageWithAuth implements IDia
         public void modifyText(@NotNull ModifyEvent e) {
             updateUI();
         }
+
         @Override
         public void widgetSelected(@NotNull SelectionEvent e) {
             updateUI();
         }
+
         @Override
         public void widgetDefaultSelected(@NotNull SelectionEvent e) {
             updateUI();

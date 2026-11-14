@@ -29,8 +29,7 @@ import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.custom.StyledText;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
@@ -85,6 +84,7 @@ import java.util.regex.PatternSyntaxException;
 public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
 {
     private static final Log log = Log.getLog(SessionManagerViewer.class);
+    private static final String SQL_LABEL = "SQL";
 
     private final IWorkbenchPart workbenchPart;
     private final DBAServerSessionManager<SESSION_TYPE> sessionManager;
@@ -118,7 +118,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
 
         Composite composite = UIUtils.createPlaceholder(parent, 1);
 
-        sashMain = UIUtils.createPartDivider(workbenchPart, composite, UIUtils.checkSashStyle(SWT.VERTICAL | SWT.SMOOTH));
+        sashMain = UIUtils.createPartDivider(workbenchPart, composite, SWT.VERTICAL | SWT.SMOOTH);
         sashMain.setLayoutData(new GridData(GridData.FILL_BOTH));
 
         refreshControl = new AutoRefreshControl(sashMain, sessionManager.getClass().getSimpleName(), monitor -> UIUtils.syncExec(this::refreshSessions));
@@ -133,7 +133,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
         }
 
         {
-            sashDetails = UIUtils.createPartDivider(workbenchPart, sashMain, UIUtils.checkSashStyle(SWT.HORIZONTAL | SWT.SMOOTH));
+            sashDetails = UIUtils.createPartDivider(workbenchPart, sashMain, SWT.HORIZONTAL | SWT.SMOOTH);
             sashDetails.setLayoutData(new GridData(GridData.FILL_BOTH));
 
             {
@@ -162,7 +162,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
                 parent.addDisposeListener(e -> sqlViewer.dispose());
 
                 CTabItem sqlViewItem = new CTabItem(previewFolder, SWT.NONE);
-                sqlViewItem.setText(SessionEditorMessages.viewer_view_item_sql);
+                sqlViewItem.setText(SQL_LABEL);
                 sqlViewItem.setImage(DBeaverIcons.getImage(DBIcon.SQL_TEXT));
                 sqlViewItem.setControl(sqlViewer.getEditorControlWrapper());
 
@@ -172,12 +172,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
                     createPlannerTab(previewFolder);
                 }
 
-                previewFolder.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
-                        updatePreview();
-                    }
-                });
+                previewFolder.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> updatePreview()));
             }
 
             {
@@ -222,9 +217,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
                 }
 
                 detailsFolder.setSelection(detailsItem);
-                detailsFolder.addSelectionListener(new SelectionAdapter() {
-                    @Override
-                    public void widgetSelected(SelectionEvent e) {
+                detailsFolder.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
                         CTabItem item = detailsFolder.getItem(detailsFolder.getSelectionIndex());
                         Object data = item.getData();
                         if (data instanceof DBAServerSessionDetails ssd) {
@@ -237,8 +230,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
                                 detailsViewer.loadData();
                             }
                         }
-                    }
-                });
+                    }));
             }
 
             sashMain.setWeights(500, 500);
@@ -463,7 +455,7 @@ public class SessionManagerViewer<SESSION_TYPE extends DBAServerSession>
             if (sessionManager instanceof DBAServerSessionManagerSQL &&
                 ((DBAServerSessionManagerSQL) sessionManager).canGenerateSessionReadQuery())
             {
-                contributionManager.add(ActionUtils.makeActionContribution(new Action(SessionEditorMessages.viewer_open_sql_editor_text, IAction.AS_PUSH_BUTTON) {
+                contributionManager.add(ActionUtils.makeActionContribution(new Action(SQL_LABEL, IAction.AS_PUSH_BUTTON) {
                     {
                         setImageDescriptor(DBeaverIcons.getImageDescriptor(DBIcon.TREE_SCRIPT));
                         setToolTipText(SessionEditorMessages.viewer_open_sql_editor_tip);

@@ -17,8 +17,7 @@
 package org.jkiss.dbeaver.tools.transfer.ui.pages.database;
 
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.*;
 import org.jkiss.code.NotNull;
@@ -35,7 +34,6 @@ import org.jkiss.dbeaver.model.struct.DBSTypedObjectExt2;
 import org.jkiss.dbeaver.tools.transfer.DTConstants;
 import org.jkiss.dbeaver.tools.transfer.database.*;
 import org.jkiss.dbeaver.tools.transfer.internal.DTActivator;
-import org.jkiss.dbeaver.tools.transfer.internal.DTMessages;
 import org.jkiss.dbeaver.tools.transfer.stream.StreamEntityMapping;
 import org.jkiss.dbeaver.tools.transfer.ui.internal.DTUIMessages;
 import org.jkiss.dbeaver.tools.transfer.ui.prefs.PrefPageDataTransfer;
@@ -138,12 +136,8 @@ public class MappingRulesDialog extends BaseDialog {
         GridData gd2 = new GridData();
         gd2.horizontalSpan = 2;
         saveSettings.setLayoutData(gd2);
-        UIUtils.createLink(mappingGroup, DTMessages.data_transfer_wizard_output_label_global_settings, new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
-                UIUtils.showPreferencesFor(getShell(), null, PrefPageDataTransfer.PAGE_ID);
-            }
-        });
+        UIUtils.createLink(mappingGroup, DTUIMessages.data_transfer_wizard_output_label_global_settings, SelectionListener.widgetSelectedAdapter(e ->
+            UIUtils.showPreferencesFor(getShell(), null, PrefPageDataTransfer.PAGE_ID)));
 
         return composite;
     }

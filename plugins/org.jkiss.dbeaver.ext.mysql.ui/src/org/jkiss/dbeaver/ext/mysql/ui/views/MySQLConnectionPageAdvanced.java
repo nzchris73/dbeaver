@@ -22,6 +22,8 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.jkiss.code.NotNull;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.ext.mysql.MySQLConstants;
 import org.jkiss.dbeaver.ext.mysql.ui.internal.MySQLUIMessages;
 import org.jkiss.dbeaver.model.DBPDataSourceContainer;
@@ -31,6 +33,7 @@ import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.dialogs.connection.ClientHomesSelector;
 import org.jkiss.dbeaver.ui.dialogs.connection.ConnectionPageAbstract;
+import org.jkiss.dbeaver.ui.internal.UIConnectionMessages;
 import org.jkiss.utils.CommonUtils;
 
 import java.util.TimeZone;
@@ -39,6 +42,7 @@ import java.util.TimeZone;
  * MySQLPageAdvanced
  */
 public class MySQLConnectionPageAdvanced extends ConnectionPageAbstract {
+    private static final Log log = Log.getLog(MySQLConnectionPageAdvanced.class);
 
     // disable Server time zone manage - it confuses users and makes very little sense
     // as now we use server timestamp format by default
@@ -48,7 +52,7 @@ public class MySQLConnectionPageAdvanced extends ConnectionPageAbstract {
     private Combo serverTimezoneCombo;
 
     public MySQLConnectionPageAdvanced() {
-        setTitle("Advanced");
+        setTitle(UIConnectionMessages.dialog_connection_advanced_tab);
         setDescription("MySQL advanced connection setting");
     }
 

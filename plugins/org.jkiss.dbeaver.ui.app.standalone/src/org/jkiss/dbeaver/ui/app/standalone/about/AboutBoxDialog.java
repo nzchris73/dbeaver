@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ import org.eclipse.core.runtime.Platform;
 import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.resource.JFaceColors;
 import org.eclipse.jface.resource.JFaceResources;
+import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.BusyIndicator;
 import org.eclipse.swt.events.MouseAdapter;
 import org.eclipse.swt.events.MouseEvent;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
@@ -35,12 +35,13 @@ import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.Log;
-import org.jkiss.dbeaver.core.CoreMessages;
 import org.jkiss.dbeaver.model.impl.app.ApplicationRegistry;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.ShellUtils;
 import org.jkiss.dbeaver.ui.UIUtils;
+import org.jkiss.dbeaver.ui.app.standalone.internal.CoreApplicationMessages;
 import org.jkiss.dbeaver.ui.controls.decorations.HolidayDecorations;
 import org.jkiss.dbeaver.ui.dialogs.InformationDialog;
 import org.jkiss.dbeaver.utils.GeneralUtils;
@@ -98,11 +99,12 @@ public class AboutBoxDialog extends InformationDialog
     @Override
     protected void configureShell(Shell newShell) {
         super.configureShell(newShell);
-        newShell.setText(CoreMessages.dialog_about_title);
+        newShell.setText(CoreApplicationMessages.dialog_about_title);
     }
 
+    @NotNull
     @Override
-    protected Control createDialogArea(Composite parent)
+    protected Control createDialogArea(@NotNull Composite parent)
     {
         Color background = JFaceColors.getBannerBackground(parent.getDisplay());
         //Color foreground = JFaceColors.getBannerForeground(parent.getDisplay());
@@ -204,10 +206,18 @@ public class AboutBoxDialog extends InformationDialog
         Text versionLabel = new Text(group, SWT.NONE);
         versionLabel.setEditable(false);
         versionLabel.setBackground(background);
-        versionLabel.setText(CoreMessages.dialog_about_label_version + GeneralUtils.getProductVersion());
+        versionLabel.setText(CoreApplicationMessages.dialog_about_label_version + GeneralUtils.getProductVersion());
         gd = new GridData(GridData.FILL_HORIZONTAL);
         gd.horizontalAlignment = GridData.CENTER;
         versionLabel.setLayoutData(gd);
+
+        int patchNumber = GeneralUtils.getProductPatchNumber();
+        if (patchNumber > 0) {
+            Label patchLabel = new Label(group, SWT.NONE);
+            patchLabel.setBackground(background);
+            patchLabel.setText(NLS.bind(CoreApplicationMessages.dialog_about_label_patch, patchNumber));
+            patchLabel.setLayoutData(new GridData(SWT.CENTER, SWT.CENTER, true, false));
+        }
 
         Label releaseTimeLabel = new Label(group, SWT.NONE);
         releaseTimeLabel.setBackground(background);
@@ -223,12 +233,8 @@ public class AboutBoxDialog extends InformationDialog
         gd.horizontalAlignment = GridData.CENTER;
         authorLabel.setLayoutData(gd);
 
-        Link siteLink = UIUtils.createLink(group, "   " + UIUtils.makeAnchor(product.getProperty(PRODUCT_PROP_WEBSITE)) + "   ", new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
-                ShellUtils.launchProgram(e.text);
-            }
-        });
+        Link siteLink = UIUtils.createLink(group, "   " + UIUtils.makeAnchor(product.getProperty(PRODUCT_PROP_WEBSITE)) + "   ", SelectionListener.widgetSelectedAdapter(e ->
+            ShellUtils.launchProgram(e.text)));
         siteLink.setBackground(background);
         gd = new GridData();
         gd.horizontalAlignment = GridData.CENTER;

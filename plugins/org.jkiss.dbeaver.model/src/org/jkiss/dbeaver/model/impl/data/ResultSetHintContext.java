@@ -130,11 +130,15 @@ public class ResultSetHintContext implements DBDValueHintContext {
         return contextConfiguration;
     }
 
-    public List<ValueHintProviderDescriptor> filterApplicableHintProviderDescriptors(List<ValueHintProviderDescriptor> descriptors) {
+    @NotNull
+    public List<ValueHintProviderDescriptor> filterApplicableHintProviderDescriptors(
+        @NotNull List<ValueHintProviderDescriptor> descriptors
+    ) {
         List<ValueHintProviderDescriptor> result = new ArrayList<>(descriptors.size());
         synchronized (this.hintProvidersLock) {
             for (ValueHintProviderDescriptor desc : descriptors) {
-                if (this.hintProviders.containsKey(desc.getInstance())) {
+                DBDValueHintProvider provider = desc.getExistingInstance();
+                if (provider != null && this.hintProviders.containsKey(provider)) {
                     result.add(desc);
                 }
             }
@@ -195,6 +199,11 @@ public class ResultSetHintContext implements DBDValueHintContext {
                         HintProviderInfo pi = new HintProviderInfo(p);
                         ValueHintProviderDescriptor providerDescriptor = hintRegistry.getDescriptorByInstance(provider);
                         pi.enabled = providerDescriptor != null && contextConfiguration.isHintEnabled(providerDescriptor);
+                        if (!pi.enabled && providerDescriptor != null && providerDescriptor.isAssociation()) {
+                            log.trace("Association hint provider '" + providerDescriptor.getId() +
+                                "' is disabled by " + contextConfiguration.getLevel().name().toLowerCase(Locale.ENGLISH) +
+                                " configuration");
+                        }
                         return pi;
                     });
                     providerInfo.attributes.add(attr);

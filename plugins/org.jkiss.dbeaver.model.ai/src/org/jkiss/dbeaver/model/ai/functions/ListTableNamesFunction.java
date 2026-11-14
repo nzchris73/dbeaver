@@ -19,11 +19,14 @@ package org.jkiss.dbeaver.model.ai.functions;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.DBPDataSource;
+import org.jkiss.dbeaver.model.DBPEvaluationContext;
 import org.jkiss.dbeaver.model.DBUtils;
 import org.jkiss.dbeaver.model.ai.AIFunction;
 import org.jkiss.dbeaver.model.ai.AIFunctionContext;
+import org.jkiss.dbeaver.model.ai.AIFunctionDescriptor;
 import org.jkiss.dbeaver.model.ai.AIFunctionResult;
 import org.jkiss.dbeaver.model.ai.AIFunctionType;
+import org.jkiss.dbeaver.model.ai.AIFunctionVerifier;
 import org.jkiss.dbeaver.model.ai.engine.AIDatabaseContext;
 import org.jkiss.dbeaver.model.ai.utils.AIUtils;
 import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
@@ -39,7 +42,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ListTableNamesFunction implements AIFunction {
+public class ListTableNamesFunction implements AIFunction, AIFunctionVerifier {
+
+    @NotNull
+    @Override
+    public FunctionState getFunctionState(
+        @NotNull AIFunctionContext context,
+        @NotNull AIFunctionDescriptor function
+    ) {
+        return context.getContext() == null ? FunctionState.NOT_APPLICABLE : FunctionState.APPLICABLE;
+    }
 
     @NotNull
     @Override
@@ -58,67 +70,80 @@ public class ListTableNamesFunction implements AIFunction {
         }
 
         String catalogName = CommonUtils.toString(parameters.get(AIFunctionParams.CATALOG_PARAM), null);
-        String schemaName = CommonUtils.toString(parameters.get(AIFunctionParams.SCHEMA_PARAM), null);
+        String schemaNamesParam = CommonUtils.toString(parameters.get(AIFunctionParams.SCHEMAS_PARAM), null);
+
         Class<? extends DBSObject> dsChildType = objectContainer.getPrimaryChildType(context.getMonitor());
         if (DBSEntity.class.isAssignableFrom(dsChildType)) {
             // Ignore catalog and schema. LLM may hallucinate
             catalogName = null;
-            schemaName = null;
+            schemaNamesParam = null;
         } else if (DBSSchema.class.isAssignableFrom(dsChildType)) {
             // Ignore schema. LLM may hallucinate
             catalogName = null;
         }
 
-        DBSObject container = DBUtils.getObjectByPath(
-            context.getMonitor(),
-            executionContext,
-            objectContainer,
-            catalogName,
-            schemaName,
-            null
-        );
-        if (container == null) {
-            container = objectContainer;
+        String[] schemaNames;
+        if (CommonUtils.isEmpty(schemaNamesParam)) {
+            schemaNames = new String[] { "" };
+        } else {
+            schemaNames = schemaNamesParam.split(",");
         }
-        if (!(container instanceof DBSObjectContainer targetContainer)) {
-            throw new DBException("Table container not found in the database");
-        }
-        if (!DBSEntity.class.isAssignableFrom(targetContainer.getPrimaryChildType(context.getMonitor()))) {
-            throw new DBException("Container '" + targetContainer.getName() + "' doesn't support tables");
-        }
-        if (!AIUtils.isObjectInScope(aiDatabaseContext, executionContext, targetContainer)) {
-            throw new DBException("Container '" + targetContainer.getName() + "' is not in scope. Access restricted.");
-        }
+        StringBuilder result = new StringBuilder();
 
-        Map<DBSEntityType, List<DBSEntity>> entities = new LinkedHashMap<>();
-        for (DBSObject child : CommonUtils.safeCollection(targetContainer.getChildren(context.getMonitor()))) {
-            if (!(child instanceof DBSEntity entity)) {
+        for (String schemaName : schemaNames) {
+            DBSObject container = DBUtils.getObjectByPath(
+                context.getMonitor(),
+                executionContext,
+                objectContainer,
+                catalogName,
+                schemaName,
+                null
+            );
+            if (container == null) {
+                container = objectContainer;
+            }
+            if (!(container instanceof DBSObjectContainer targetContainer)) {
+                throw new DBException("Table container not found in the database");
+            }
+            if (!DBSEntity.class.isAssignableFrom(targetContainer.getPrimaryChildType(context.getMonitor()))) {
+                throw new DBException("Container '" + targetContainer.getName() + "' doesn't support tables");
+            }
+            if (!AIUtils.isObjectInScope(aiDatabaseContext, executionContext, targetContainer)) {
+                throw new DBException("Container '" + targetContainer.getName() + "' is not in scope. Access restricted.");
+            }
+
+            Map<DBSEntityType, List<DBSEntity>> entities = new LinkedHashMap<>();
+            for (DBSObject child : CommonUtils.safeCollection(targetContainer.getChildren(context.getMonitor()))) {
+                if (!(child instanceof DBSEntity entity)) {
+                    continue;
+                }
+                if (!AIUtils.isObjectInScope(aiDatabaseContext, executionContext, child)) {
+                    continue;
+                }
+                entities.computeIfAbsent(entity.getEntityType(), dbsEntityType -> new ArrayList<>()).add(entity);
+            }
+
+            if (entities.isEmpty()) {
                 continue;
             }
-            if (!AIUtils.isObjectInScope(aiDatabaseContext, executionContext, child)) {
-                continue;
-            }
-            entities.computeIfAbsent(entity.getEntityType(), dbsEntityType -> new ArrayList<>()).add(entity);
-        }
 
-        if (entities.isEmpty()) {
+            for (Map.Entry<DBSEntityType, List<DBSEntity>> e : entities.entrySet()) {
+                result.append(e.getKey().getName()).append(" names:");
+                List<DBSEntity> value = e.getValue();
+                for (int i = 0; i < value.size(); i++) {
+                    if (i > 0) {
+                        result.append(',');
+                    }
+                    result.append(DBUtils.getObjectFullName(dataSource, value.get(i), DBPEvaluationContext.DML));
+                }
+                result.append("\n");
+            }
+        }
+        if (result.isEmpty()) {
             return new AIFunctionResult(
                 AIFunctionType.INFORMATION,
                 "There are no tables in " + objectContainer.getName()
             );
-        }
-
-        StringBuilder result = new StringBuilder();
-        for (Map.Entry<DBSEntityType, List<DBSEntity>> e : entities.entrySet()) {
-            result.append(e.getKey().getName()).append(" names:");
-            List<DBSEntity> value = e.getValue();
-            for (int i = 0; i < value.size(); i++) {
-                if (i > 0) {
-                    result.append(',');
-                }
-                result.append(DBUtils.getQuotedIdentifier(value.get(i)));
-            }
-            result.append("\n");
         }
         return new AIFunctionResult(AIFunctionType.INFORMATION, result.toString());
     }

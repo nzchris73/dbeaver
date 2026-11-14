@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,7 @@ import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.IContributionManager;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
@@ -146,14 +145,11 @@ public class DateTimeInlineEditor extends BaseValueEditor<Control> {
     @Override
     protected void addInlineListeners(@NotNull Control inlineControl, @NotNull Listener listener) {
         super.addInlineListeners(inlineControl, listener);
-        timeEditor.addSelectionAdapter(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
+        timeEditor.addSelectionAdapter(SelectionListener.widgetSelectedAdapter(e -> {
                 Event selectionEvent = new Event();
                 selectionEvent.widget = timeEditor.getControl();
                 timeEditor.getControl().notifyListeners(SWT.Selection, selectionEvent);
-            }
-        });
+            }));
         timeEditor.addModifyListener(e -> {
             Event modificationEvent = new Event();
             modificationEvent.widget = timeEditor.getControl();
@@ -172,8 +168,8 @@ public class DateTimeInlineEditor extends BaseValueEditor<Control> {
                 SWT.MULTI, true, inline);
         textMode = new TextMode(this, timeEditor, valueController);
         dateEditorMode = new DateEditorMode(this, timeEditor);
-        if (!isCalendarMode()) {
-            textMode.run();
+        if (!DBWorkbench.getPlatform().getPreferenceStore().getBoolean(ModelPreferences.RESULT_SET_USE_DATETIME_EDITOR)) {
+            timeEditor.setToTextComposite();
             textMode.setChecked(true);
         } else dateEditorMode.setChecked(true);
 
@@ -186,7 +182,7 @@ public class DateTimeInlineEditor extends BaseValueEditor<Control> {
     }
 
     private boolean isCalendarMode() {
-        return DBWorkbench.getPlatform().getPreferenceStore().getBoolean(ModelPreferences.RESULT_SET_USE_DATETIME_EDITOR);
+        return !timeEditor.isTextMode();
     }
 
     @Override
@@ -214,6 +210,17 @@ public class DateTimeInlineEditor extends BaseValueEditor<Control> {
     @Override
     public void primeEditorValue(@Nullable Object value) {
         timeEditor.setTextValue(valueController.getValueHandler().getValueDisplayString(valueController.getValueType(), value, DBDDisplayFormat.EDIT));
+        // Native date/time values can be strings and should be edited as text without calendar conversion.
+        dateEditorMode.setEnabled(!(value instanceof String));
+        if (value instanceof String) {
+            timeEditor.setToTextComposite();
+            textMode.setChecked(true);
+            dateEditorMode.setChecked(false);
+            if (valueController.getEditType() == IValueController.EditType.INLINE) {
+                timeEditor.selectAllContent();
+            }
+            return;
+        }
         try {
             timeEditor.setValue(value);
         } catch (DBCException exception) {

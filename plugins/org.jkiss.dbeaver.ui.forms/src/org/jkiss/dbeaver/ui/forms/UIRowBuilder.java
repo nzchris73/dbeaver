@@ -16,12 +16,10 @@
  */
 package org.jkiss.dbeaver.ui.forms;
 
-import org.eclipse.core.databinding.conversion.text.NumberToStringConverter;
-import org.eclipse.core.databinding.conversion.text.StringToNumberConverter;
-import org.eclipse.core.internal.databinding.validation.StringToIntegerValidator;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.ui.forms.widgets.ExpandableComposite;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.ui.ShellUtils;
 
@@ -48,8 +46,31 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
     @NotNull
     UIRowBuilder panel(@NotNull Consumer<? super UIPanelBuilder> handler);
 
+    /**
+     * Groups a row of controls with a description below it. The description is
+     * indented and follows the row's enabled and visible state.
+     */
     @NotNull
-    UIRowBuilder expandablePanel(@NotNull String text, boolean expanded, @NotNull Consumer<? super UIPanelBuilder> handler);
+    default UIRowBuilder withHint(@NotNull String hint, @NotNull Consumer<? super UIRowBuilder> handler) {
+        return panel(pb -> pb
+            .margins(0, 0)
+            .spacing(0, 2)
+            .row(handler)
+            .indent(p -> p.row(rb -> rb.control(parent -> new HintLabel(parent, hint)))));
+    }
+
+    @NotNull
+    default UIRowBuilder expandablePanel(@NotNull String text, boolean expanded, @NotNull Consumer<? super UIPanelBuilder> handler) {
+        return expandablePanel(text, expanded, identityConsumer(), handler);
+    }
+
+    @NotNull
+    UIRowBuilder expandablePanel(
+        @NotNull String text,
+        boolean expanded,
+        @NotNull Consumer<ExpandableComposite> onExpansionChanged,
+        @NotNull Consumer<? super UIPanelBuilder> handler
+    );
 
     @NotNull
     UIRowBuilder titledPanel(@NotNull String text, @NotNull Consumer<? super UIPanelBuilder> handler);
@@ -103,8 +124,18 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
     }
 
     @NotNull
+    default UIRowBuilder weblink(@NotNull String text, @NotNull Consumer<? super UIControlBuilder.LinkBuilder> handler) {
+        return link(UIObservable.of(text), e -> ShellUtils.launchProgram(e.text), handler);
+    }
+
+    @NotNull
     default UIRowBuilder weblink(@NotNull UIObservable<String> text) {
         return weblink(text, identityConsumer());
+    }
+
+    @NotNull
+    default UIRowBuilder weblink(@NotNull String text) {
+        return weblink(UIObservable.of(text));
     }
 
     @NotNull
@@ -132,7 +163,10 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
     }
 
     @NotNull
-    UIRowBuilder radioButton(@NotNull UIObservable<String> text, @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler);
+    UIRowBuilder radioButton(
+        @NotNull UIObservable<String> text,
+        @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler
+    );
 
     @NotNull
     default UIRowBuilder radioButton(@NotNull String text, @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler) {
@@ -145,11 +179,25 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
     }
 
     @NotNull
+    default UIRowBuilder radioButton(@NotNull String text, @NotNull String tooltip, @NotNull UIObservable<Boolean> selected) {
+        return radioButton(text, bb -> bb.tooltip(tooltip).selected(selected));
+    }
+
+    @NotNull
     UIRowBuilder checkBox(@NotNull UIObservable<String> text, @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler);
 
     @NotNull
     default UIRowBuilder checkBox(@NotNull String text, @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler) {
         return checkBox(UIObservable.of(text), handler);
+    }
+
+    @NotNull
+    default UIRowBuilder checkBox(
+        @NotNull String text,
+        @NotNull String hint,
+        @NotNull Consumer<? super UIControlBuilder.ButtonBuilder> handler
+    ) {
+        return withHint(hint, rb -> rb.checkBox(text, handler));
     }
 
     @NotNull
@@ -160,6 +208,11 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
     @NotNull
     default UIRowBuilder checkBox(@NotNull String text, @NotNull UIObservable<Boolean> selected) {
         return checkBox(text, bb -> bb.selected(selected));
+    }
+
+    @NotNull
+    default UIRowBuilder checkBox(@NotNull String text, @NotNull String tooltip, @NotNull UIObservable<Boolean> selected) {
+        return checkBox(text, bb -> bb.tooltip(tooltip).selected(selected));
     }
 
     @NotNull
@@ -186,13 +239,10 @@ public sealed interface UIRowBuilder permits UIRowBuilderImpl {
         var format = NumberFormat.getIntegerInstance();
         format.setGroupingUsed(false);
 
-        var toModelConverter = StringToNumberConverter.toInteger(true);
-        var toModelValidator = new StringToIntegerValidator(toModelConverter);
-        var fromModelConverter = NumberToStringConverter.fromInteger(format, true);
         return textField(binding, tb -> {
             handler.accept(tb);
-            tb.toModel(toModelValidator::validate, toModelConverter::convert);
-            tb.fromModel(fromModelConverter::convert);
+            tb.toModel(UIValidators::validateInteger, Integer::valueOf);
+            tb.fromModel(value -> value == null ? "" : format.format(value));
         });
     }
 

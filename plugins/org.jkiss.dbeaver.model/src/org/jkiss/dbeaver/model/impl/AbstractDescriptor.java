@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.jkiss.dbeaver.model.impl;
 
 import org.apache.commons.jexl3.*;
+import org.apache.commons.jexl3.introspection.JexlPermissions;
 import org.apache.commons.jexl3.introspection.JexlUberspect;
 import org.eclipse.core.expressions.*;
 import org.eclipse.core.runtime.CoreException;
@@ -29,11 +30,14 @@ import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBIcon;
 import org.jkiss.dbeaver.model.DBPImage;
+import org.jkiss.dbeaver.utils.RuntimeUtils;
 import org.jkiss.utils.CommonUtils;
 import org.osgi.framework.Bundle;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.*;
 
 /**
@@ -49,14 +53,14 @@ public abstract class AbstractDescriptor {
     private static JexlEngine jexlEngine;
 
     private static final Map<String, Map<String, Boolean>> classInfoCache = new HashMap<>();
-
     private static final List<JexlUberspect.PropertyResolver> POJO = List.of(
         JexlUberspect.JexlResolver.PROPERTY,
         JexlUberspect.JexlResolver.MAP,
         JexlUberspect.JexlResolver.LIST,
         JexlUberspect.JexlResolver.DUCK,
         JexlUberspect.JexlResolver.FIELD,
-        JexlUberspect.JexlResolver.CONTAINER);
+        JexlUberspect.JexlResolver.CONTAINER
+    );
 
     private static final JexlUberspect.ResolverStrategy JEXL_STRATEGY = (op, obj) -> {
         if (op == JexlOperator.ARRAY_GET) {
@@ -76,6 +80,7 @@ public abstract class AbstractDescriptor {
         synchronized (AbstractDescriptor.class) {
             if (jexlEngine == null) {
                 jexlEngine = new JexlBuilder()
+                    .permissions(new DBeaverJexlPermissions())
                     .cache(100)
                     .strategy(JEXL_STRATEGY)
                     .create();
@@ -278,13 +283,33 @@ public abstract class AbstractDescriptor {
                 // Use only type name
                 return getTypeInfoCache(clazz).containsKey(implName);
             }
+            // Even with forceCheck, an unrelated type cannot match. Avoid loading its bundle just to reject it.
+            if (!Object.class.getName().equals(implName) && !hasTypeName(clazz, implName)) {
+                return false;
+            }
             getObjectClass();
             return implClass != null && implClass.isAssignableFrom(clazz);
         }
 
+        private boolean hasTypeName(@Nullable Class<?> clazz, @Nullable String typeName) {
+            if (clazz == null) {
+                return false;
+            }
+            if (clazz.getName().equals(typeName)) {
+                return true;
+            }
+            for (Class<?> implementedInterface : clazz.getInterfaces()) {
+                if (hasTypeName(implementedInterface, typeName)) {
+                    return true;
+                }
+            }
+            return hasTypeName(clazz.getSuperclass(), typeName);
+        }
+
         @Override
+        @NotNull
         public String toString() {
-            return implName;
+            return String.valueOf(implName);
         }
     }
 
@@ -385,7 +410,7 @@ public abstract class AbstractDescriptor {
     }
 
     @NotNull
-    protected DBPImage iconToImage(String icon, @NotNull DBPImage defIcon) {
+    protected DBPImage iconToImage(@Nullable String icon, @NotNull DBPImage defIcon) {
         DBPImage result = iconToImage(icon);
         return Objects.requireNonNullElse(result, defIcon);
     }
@@ -399,7 +424,7 @@ public abstract class AbstractDescriptor {
             return DBIcon.getImageById(icon.substring(1));
         } else {
             if (!icon.startsWith("platform:")) {
-                icon = "platform:/plugin/" + pluginId + "/" + icon;
+                icon = RuntimeUtils.makePlatformResourceUrl(pluginId, icon);
             }
             return new DBIcon(icon);
         }
@@ -465,4 +490,55 @@ public abstract class AbstractDescriptor {
         return (Class<T>) objectClass;
     }
 
+    public static final class DBeaverJexlPermissions implements JexlPermissions {
+
+        private static JexlPermissions BASE = JexlPermissions.RESTRICTED;
+
+        public DBeaverJexlPermissions() {
+            BASE = JexlPermissions.RESTRICTED;
+        }
+
+        public DBeaverJexlPermissions(@NotNull JexlPermissions base) {
+            BASE = base;
+        }
+
+        private static boolean isAllowedPackage(@NotNull Class<?> clazz) {
+            String name = clazz.getName();
+            return checkPackage(name);
+        }
+
+        @Override
+        public boolean allow(@NotNull Class<?> clazz) {
+            return isAllowedPackage(clazz) || BASE.allow(clazz);
+        }
+
+        @Override
+        public boolean allow(@NotNull Method method) {
+            return isAllowedPackage(method.getDeclaringClass()) || BASE.allow(method);
+        }
+
+        @Override
+        public boolean allow(@NotNull Package aPackage) {
+            return checkPackage(aPackage.getName()) || BASE.allow(aPackage);
+        }
+
+        @Override
+        public boolean allow(@NotNull Field field) {
+            return isAllowedPackage(field.getDeclaringClass()) || BASE.allow(field);
+        }
+
+        @Override
+        public boolean allow(@NotNull Constructor<?> ctor) {
+            return isAllowedPackage(ctor.getDeclaringClass()) || BASE.allow(ctor);
+        }
+
+        @Override
+        public JexlPermissions compose(@NotNull String... strings) {
+            return new DBeaverJexlPermissions(BASE.compose(strings));
+        }
+
+        private static boolean checkPackage(@NotNull String name) {
+            return name.startsWith("org.jkiss.dbeaver.") || name.startsWith("org.jkiss.utils.") || name.startsWith("com.dbeaver.");
+        }
+    }
 }

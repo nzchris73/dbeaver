@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,7 @@ package org.jkiss.dbeaver.ext.cubrid.ui.views;
 
 import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.FontData;
 import org.eclipse.swt.graphics.Point;
@@ -31,25 +30,31 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.Tree;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.ext.cubrid.CubridConstants;
 import org.jkiss.dbeaver.ext.cubrid.ui.internal.CubridMessages;
 import org.jkiss.dbeaver.model.DBIcon;
 import org.jkiss.dbeaver.model.exec.jdbc.JDBCSession;
 import org.jkiss.dbeaver.ui.dialogs.BaseDialog;
+import org.jkiss.dbeaver.utils.RuntimeUtils;
 
 public class CubridOIDSearchDialog extends BaseDialog {
 
-    private static DBIcon cubridIcon = new DBIcon("platform:/plugin/org.jkiss.dbeaver.ext.cubrid/icons/cubrid_icon.png");
+    private static final DBIcon CUBRID_ICON = new DBIcon(RuntimeUtils.makePlatformResourceUrl(
+        CubridConstants.PLUGIN_ID, "icons/cubrid_icon.png"));
     private Text oidValueText;
     private Button findButton;
     private Tree resultTree;
     private Font boldFont;
     private CubridOIDSearch oidSearch;
 
-    public CubridOIDSearchDialog(Shell parentShell, JDBCSession session) {
-        super(parentShell, CubridMessages.cubrid_oid_search_navigator_title, cubridIcon);
+    public CubridOIDSearchDialog(@Nullable Shell parentShell, @NotNull JDBCSession session) {
+        super(parentShell, CubridMessages.cubrid_oid_search_navigator_title, CUBRID_ICON);
         this.oidSearch = new CubridOIDSearch(session);
     }
 
+    @NotNull
     @Override
     protected Point getInitialSize() {
         Point calculatedSize = super.getInitialSize();
@@ -58,12 +63,13 @@ public class CubridOIDSearchDialog extends BaseDialog {
     }
 
     @Override
-    protected void createButtonsForButtonBar(Composite parent) {
+    protected void createButtonsForButtonBar(@NotNull Composite parent) {
         createButton(parent, IDialogConstants.OK_ID, IDialogConstants.OK_LABEL, true);
     }
 
+    @NotNull
     @Override
-    protected Composite createDialogArea(Composite parent) {
+    protected Composite createDialogArea(@NotNull Composite parent) {
         Composite container = (Composite) super.createDialogArea(parent);
 
         Label title = new Label(container, SWT.NONE);
@@ -99,12 +105,10 @@ public class CubridOIDSearchDialog extends BaseDialog {
         GridData buttonLayout = new GridData(SWT.FILL, SWT.CENTER, false, false);
         buttonLayout.widthHint = 80;
         findButton.setLayoutData(buttonLayout);
-        findButton.addSelectionListener(new SelectionAdapter() {
-            public void widgetSelected(SelectionEvent event) {
+        findButton.addSelectionListener(SelectionListener.widgetSelectedAdapter(event -> {
                 resultTree.removeAll();
                 oidSearch.searchOID(oidValueText.getText(), resultTree);
-            }
-        });
+            }));
 
         oidValueText.addModifyListener(e -> {
             findButton.setEnabled(!oidValueText.getText().trim().isEmpty());

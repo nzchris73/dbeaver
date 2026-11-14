@@ -21,6 +21,7 @@ import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBDatabaseException;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.ext.postgresql.PostgreConstants;
 import org.jkiss.dbeaver.ext.postgresql.model.*;
 import org.jkiss.dbeaver.ext.postgresql.model.impls.PostgreServerExtensionBase;
 import org.jkiss.dbeaver.model.DBPErrorAssistant;
@@ -35,6 +36,7 @@ import org.jkiss.dbeaver.model.exec.jdbc.JDBCStatement;
 import org.jkiss.dbeaver.model.impl.jdbc.JDBCUtils;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.sql.SQLState;
+import org.jkiss.dbeaver.model.sql.SQLUtils;
 import org.jkiss.dbeaver.model.struct.DBSTypedObject;
 import org.jkiss.utils.CommonUtils;
 import org.osgi.framework.Version;
@@ -59,8 +61,9 @@ public class PostgreServerRedshift extends PostgreServerExtensionBase implements
     public static final String RS_OBJECT_CLASS = "com.amazon.redshift.util.RedshiftObject";
 
     private Version redshiftVersion;
+    private Boolean supportsRecentQueries;
 
-    public PostgreServerRedshift(PostgreDataSource dataSource) {
+    public PostgreServerRedshift(@NotNull PostgreDataSource dataSource) {
         super(dataSource);
     }
     
@@ -267,7 +270,30 @@ public class PostgreServerRedshift extends PostgreServerExtensionBase implements
 
     @Override
     public boolean supportsLocks() {
-        return false;
+        return true;
+    }
+
+    @NotNull
+    @Override
+    public String getLocksQuery(@NotNull JDBCSession session) throws SQLException {
+        if (supportsRecentQueries == null) {
+            supportsRecentQueries = JDBCUtils.queryString(session,
+                "SELECT 1 FROM pg_catalog.pg_class cls JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace "
+                    + "WHERE ns.nspname = ? AND cls.relname = ?", PostgreConstants.CATALOG_SCHEMA_NAME, "stv_recents") != null;
+        }
+        return supportsRecentQueries ? RedshiftQueries.LOCK_QUERY_WITH_RECENTS : RedshiftQueries.LOCK_QUERY;
+    }
+
+    @NotNull
+    @Override
+    public String getLockItemsQuery() {
+        return RedshiftQueries.LOCK_ITEM_QUERY;
+    }
+
+    @NotNull
+    @Override
+    public String getSearchPathQuery() {
+        return "SHOW search_path";
     }
 
     @Override
@@ -410,6 +436,7 @@ public class PostgreServerRedshift extends PostgreServerExtensionBase implements
 
     private class RedshiftSchemaCache extends PostgreDatabase.SchemaCache {
         private final Map<String, String> esSchemaMap = new HashMap<>();
+        private final String minimalPrivilegeRequired = SQLUtils.quoteString(dataSource, PostgrePrivilegeType.USAGE.getName());
 
         @NotNull
         @Override
@@ -431,6 +458,25 @@ public class PostgreServerRedshift extends PostgreServerExtensionBase implements
 
             // 2. Rad standard schemas
             return super.prepareLookupStatement(session, database, object, objectName);
+        }
+
+        @Override
+        protected boolean addExtraCondition(@NotNull JDBCSession session, @NotNull StringBuilder query) {
+            return session.getExecutionContext() instanceof PostgreExecutionContext postgreExecutionContext
+                && addUserHasUsagePrivilege(postgreExecutionContext.getActiveUser(), query);
+        }
+
+        private boolean addUserHasUsagePrivilege(@Nullable String currentUserName, @NotNull StringBuilder query) {
+            query.append("WHERE has_schema_privilege(");
+            if (CommonUtils.isNotEmpty(currentUserName)) {
+                query.append(SQLUtils.quoteString(dataSource, currentUserName))
+                    .append(", ");
+            }
+            query
+                .append("nspname, ")
+                .append(minimalPrivilegeRequired)
+                .append(")\n");
+            return true;
         }
 
         @Override

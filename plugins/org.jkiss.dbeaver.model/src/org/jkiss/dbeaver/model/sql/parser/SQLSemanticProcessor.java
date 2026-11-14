@@ -64,17 +64,25 @@ public class SQLSemanticProcessor {
     private static final boolean ALLOW_COMPLEX_PARSING = false;
     private static final int PARSE_FUTURE_TIMEOUT_MS = 1000; // if we can't parse fast, we don't want to
 
-    private static final ExecutorService executor = Executors.newCachedThreadPool();
+    private static final class ParserExecutor {
+        private static final ExecutorService executor = Executors.newCachedThreadPool(
+            Thread.ofPlatform().daemon().name("SQL parser-", 0).factory());
 
-    public static void shutdownExecutor() {
-        if (!executor.shutdownNow().isEmpty()) {
-            log.warn("Unexpected awaiting tasks found while terminating JSqlParser executor.");
+        static {
+            // Only install the hook if a timed parse actually needs the executor.
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                if (!executor.shutdownNow().isEmpty()) {
+                    log.warn("Unexpected awaiting tasks found while terminating JSqlParser executor.");
+                }
+            }, "SQL parser shutdown"));
         }
     }
 
     @NotNull
     private static CCJSqlParser buildParser(@Nullable SQLDialect dialect, @NotNull String sql) throws DBCException {
-        final String sqlWithoutComments = dialect == null ? sql : SQLUtils.stripComments(dialect, sql);
+        final String sqlWithoutComments = dialect == null
+            ? sql
+            : SQLUtils.stripComments(dialect, SQLUtils.maskDialectLineComments(dialect, sql));
         try {
             CCJSqlParser parser = new CCJSqlParser(sqlWithoutComments)
                 .withAllowComplexParsing(ALLOW_COMPLEX_PARSING);
@@ -86,6 +94,11 @@ public class SQLSemanticProcessor {
                         break;
                     }
                 }
+                // Match MySQL-style backslash escaping so the parser agrees with SQLUtils.maskDialectLineComments
+                // on where string literals end (e.g. 'O\'Brien'); otherwise the parser sees a stray closing quote.
+                if (dialect.getStringEscapeCharacter() == '\\') {
+                    parser.withBackslashEscapeCharacter(true);
+                }
             }
             return parser;
         } catch (ParseException e) {
@@ -95,7 +108,7 @@ public class SQLSemanticProcessor {
 
     @NotNull
     private static <T> T callWithTimeout(@NotNull CCJSqlParser parser, @NotNull Callable<T> task) throws DBCException {
-        Future<T> future = executor.submit(task);
+        Future<T> future = ParserExecutor.executor.submit(task);
         try {
             return future.get(PARSE_FUTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (TimeoutException | InterruptedException e) {

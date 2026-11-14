@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,6 @@ import org.jkiss.dbeaver.tools.transfer.*;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseConsumerSettings;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseMappingContainer;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseTransferConsumer;
-import org.jkiss.dbeaver.tools.transfer.internal.DTMessages;
 import org.jkiss.dbeaver.tools.transfer.registry.DataTransferProcessorDescriptor;
 import org.jkiss.dbeaver.tools.transfer.stream.StreamEntityMapping;
 import org.jkiss.dbeaver.tools.transfer.stream.StreamProducerSettings;
@@ -59,12 +58,11 @@ import org.jkiss.dbeaver.ui.properties.PropertyTreeViewer;
 import org.jkiss.dbeaver.utils.HelpUtils;
 import org.jkiss.utils.CommonUtils;
 
-import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class StreamProducerPageSettings extends DataTransferPageNodeSettings {
@@ -83,9 +81,9 @@ public class StreamProducerPageSettings extends DataTransferPageNodeSettings {
     private String noneItemSelectedText = DTUIMessages.stream_consumer_page_settings_item_text_none;
 
     public StreamProducerPageSettings() {
-        super(DTMessages.data_transfer_wizard_page_input_files_name);
-        setTitle(DTMessages.data_transfer_wizard_page_input_files_title);
-        setDescription(DTMessages.data_transfer_wizard_page_input_files_description);
+        super(DTUIMessages.data_transfer_wizard_page_input_files_name);
+        setTitle(DTUIMessages.data_transfer_wizard_page_input_files_title);
+        setDescription(DTUIMessages.data_transfer_wizard_page_input_files_description);
         setPageComplete(false);
     }
 
@@ -180,7 +178,7 @@ public class StreamProducerPageSettings extends DataTransferPageNodeSettings {
 
         {
             Composite exporterSettings = UIUtils.createComposite(settingsDivider, 1);
-            UIUtils.createControlLabel(exporterSettings, DTMessages.data_transfer_wizard_settings_group_importer);
+            UIUtils.createControlLabel(exporterSettings, DTUIMessages.data_transfer_wizard_settings_group_importer);
 
             propsEditor = new PropertyTreeViewer(exporterSettings, SWT.BORDER);
             Object layoutData = propsEditor.getControl().getLayoutData();
@@ -274,7 +272,7 @@ public class StreamProducerPageSettings extends DataTransferPageNodeSettings {
     private Composite createFileSelectionToolBar(@NotNull Composite inputFilesTableGroup) {
         final Composite toolbar = new Composite(inputFilesTableGroup, SWT.NONE);
         toolbar.setLayout(new GridLayout(4, false));
-        UIUtils.createControlLabel(toolbar, DTMessages.data_transfer_wizard_settings_group_input_files);
+        UIUtils.createControlLabel(toolbar, DTUIMessages.data_transfer_wizard_settings_group_input_files);
 
         tiOpenLocal = UIUtils.createPushButton(
             toolbar,
@@ -547,18 +545,14 @@ public class StreamProducerPageSettings extends DataTransferPageNodeSettings {
                     initializer = monitor -> updateSingleConsumer(monitor, pipe, selected.getPath());
                 }
             } else if (pipe.getConsumer() != null && pipe.getConsumer().getTargetObjectContainer() != null) {
-                File[] files = DialogUtils.openFileList(getShell(), DTUIMessages.stream_producer_select_input_file, extensions);
+                Path[] files = DialogUtils.openFileList(getShell(), DTUIMessages.stream_producer_select_input_file, extensions);
                 if (files != null && files.length > 0) {
-                    initializer = monitor -> updateMultiConsumers(
-                        monitor,
-                        pipe,
-                        Arrays.stream(files).map(File::toPath).toArray(Path[]::new)
-                    );
+                    initializer = monitor -> updateMultiConsumers(monitor, pipe, files);
                 }
             } else {
-                File file = DialogUtils.openFile(getShell(), extensions);
+                Path file = DialogUtils.openFile(getShell(), extensions);
                 if (file != null) {
-                    initializer = monitor -> updateSingleConsumer(monitor, pipe, file.toPath());
+                    initializer = monitor -> updateSingleConsumer(monitor, pipe, file);
                 }
             }
             if (initializer != null) {

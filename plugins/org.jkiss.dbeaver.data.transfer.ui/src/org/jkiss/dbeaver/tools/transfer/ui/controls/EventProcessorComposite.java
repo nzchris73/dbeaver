@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,7 @@ import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.layout.GridLayoutFactory;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Link;
@@ -30,9 +29,9 @@ import org.eclipse.swt.widgets.Shell;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.tools.transfer.IDataTransferConsumerSettings;
-import org.jkiss.dbeaver.tools.transfer.internal.DTMessages;
 import org.jkiss.dbeaver.tools.transfer.registry.DataTransferEventProcessorDescriptor;
 import org.jkiss.dbeaver.tools.transfer.ui.IDataTransferEventProcessorConfigurator;
+import org.jkiss.dbeaver.tools.transfer.ui.internal.DTUIMessages;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.dialogs.BaseDialog;
 
@@ -60,17 +59,11 @@ public class EventProcessorComposite<T extends IDataTransferConsumerSettings> ex
         setLayout(GridLayoutFactory.fillDefaults().numColumns(hasControl ? 2 : 1).create());
 
         enabledCheckbox = UIUtils.createCheckbox(this, descriptor.getLabel(), descriptor.getDescription(), false, 1);
-        enabledCheckbox.addSelectionListener(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
-                setProcessorEnabled(enabledCheckbox.getSelection());
-            }
-        });
+        enabledCheckbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+            setProcessorEnabled(enabledCheckbox.getSelection())));
 
         if (hasControl) {
-            configureLink = UIUtils.createLink(this, DTMessages.data_transfer_wizard_output_event_processor_configure, new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
+            configureLink = UIUtils.createLink(this, DTUIMessages.data_transfer_wizard_output_event_processor_configure, SelectionListener.widgetSelectedAdapter(e -> {
                     if (rawSettings != null) {
                         configurator.loadSettings(rawSettings);
                         rawSettings = null;
@@ -79,8 +72,7 @@ public class EventProcessorComposite<T extends IDataTransferConsumerSettings> ex
                     if (dialog.open() == IDialogConstants.OK_ID) {
                         propertyChangeListener.run();
                     }
-                }
-            });
+                }));
         }
     }
 
@@ -140,7 +132,7 @@ public class EventProcessorComposite<T extends IDataTransferConsumerSettings> ex
 
     private class ConfigureDialog extends BaseDialog {
         public ConfigureDialog(@NotNull Shell shell) {
-            super(shell, NLS.bind(DTMessages.data_transfer_wizard_output_event_processor_configure_title, descriptor.getLabel()), null);
+            super(shell, NLS.bind(DTUIMessages.data_transfer_wizard_output_event_processor_configure_title, descriptor.getLabel()), null);
             setShellStyle(SWT.DIALOG_TRIM | SWT.APPLICATION_MODAL);
         }
 

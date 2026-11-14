@@ -18,6 +18,7 @@
 package org.jkiss.dbeaver.ui.controls.folders;
 
 import org.eclipse.jface.text.source.ISharedTextColors;
+import org.eclipse.jface.util.IPropertyChangeListener;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.accessibility.*;
 import org.eclipse.swt.events.*;
@@ -30,6 +31,7 @@ import org.eclipse.swt.widgets.Canvas;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.ui.PlatformUI;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.ui.*;
 import org.jkiss.dbeaver.ui.css.CSSUtils;
@@ -70,6 +72,8 @@ public class TabbedFolderList extends ConComposite {
 
     private final TopNavigationElement topNavigationElement;
     private final BottomNavigationElement bottomNavigationElement;
+    private final IPropertyChangeListener themeChangeListener;
+    private boolean themeRefreshPending;
 
     private int widestLabelIndex = NONE;
     private int tabsThatFitInComposite = NONE;
@@ -159,7 +163,10 @@ public class TabbedFolderList extends ConComposite {
          * @param e the paint event.
          */
         private void paint(PaintEvent e) {
-            Color bgColor = getWidgetBackground(true);
+            boolean lightDialog = UIUtils.isInDialog(this) && !UIStyles.isDarkTheme();
+            Color bgColor = selected && lightDialog
+                ? getDisplay().getSystemColor(SWT.COLOR_LIST_BACKGROUND)
+                : getWidgetBackground(true);
             /*
 			 * draw the top two lines of the tab, same for selected, hover and
 			 * default
@@ -226,7 +233,9 @@ public class TabbedFolderList extends ConComposite {
             }
 
 			/* draw the text */
-            e.gc.setForeground(widgetForeground);
+            e.gc.setForeground(selected && lightDialog
+                ? getDisplay().getSystemColor(SWT.COLOR_LIST_FOREGROUND)
+                : widgetForeground);
             if (selected) {
 				/* selected tab is bold font */
                 e.gc.setFont(BaseThemeSettings.instance.partTitleBoldFont);
@@ -433,8 +442,8 @@ public class TabbedFolderList extends ConComposite {
     }
 
     private Color getWidgetBackground(boolean adapt) {
-        if (UIUtils.isInDialog(this) && UIStyles.isDarkTheme()) {
-            return getParent().getBackground();
+        if (UIUtils.isInDialog(this)) {
+            return UIStyles.isDarkTheme() ? getParent().getBackground() : getDisplay().getSystemColor(SWT.COLOR_WIDGET_BACKGROUND);
         } else {
             Color listBackground = UIStyles.getDefaultTextBackground();
 
@@ -467,6 +476,23 @@ public class TabbedFolderList extends ConComposite {
         bottomNavigationElement = new BottomNavigationElement(this);
 
         initColours();
+
+        themeChangeListener = event -> {
+            if (!themeRefreshPending) {
+                themeRefreshPending = true;
+                UIUtils.asyncExec(() -> {
+                    themeRefreshPending = false;
+                    if (!isDisposed()) {
+                        CSSUtils.applyStyles(this);
+                        initColours();
+                        Rectangle area = getParent().getClientArea();
+                        getParent().redraw(area.x, area.y, area.width, area.height, true);
+                    }
+                });
+            }
+        };
+        PlatformUI.getWorkbench().getThemeManager().addPropertyChangeListener(themeChangeListener);
+
         initAccessible();
 
         this.addFocusListener(new FocusListener() {
@@ -497,9 +523,24 @@ public class TabbedFolderList extends ConComposite {
                 UIUtils.dispose(di);
             }
             grayedImages.clear();
+            PlatformUI.getWorkbench().getThemeManager().removePropertyChangeListener(themeChangeListener);
         });
 
         UIUtils.installAndUpdateMainFont(this);
+    }
+
+    @Override
+    public void setBackground(Color color) {
+        super.setBackground(color);
+        if (topNavigationElement != null) {
+            refreshColours();
+        }
+    }
+
+    private void refreshColours() {
+        initColours();
+        Rectangle clientArea = getClientArea();
+        redraw(clientArea.x, clientArea.y, clientArea.width, clientArea.height, true);
     }
 
     /**
@@ -728,18 +769,22 @@ public class TabbedFolderList extends ConComposite {
         ISharedTextColors sharedColors = UIUtils.getSharedTextColors();
 
         Color widgetBackground;
-        if (UIStyles.isDarkTheme()) {
-            // By some reason E4 sets white background in dark theme.
-            widgetBackground = UIStyles.isDarkHighContrastTheme()
-                ? UIStyles.getDefaultWidgetBackground()
-                : UIStyles.getDefaultTextBackground();
+        if (UIStyles.isDarkTheme() || UIUtils.isInDialog(this)) {
+            // E4 may set a white background in dark theme; dialogs use the SWT widget background in light theme.
+            widgetBackground = UIStyles.isDarkTheme() && !UIStyles.isDarkHighContrastTheme()
+                ? UIStyles.getDefaultTextBackground()
+                : UIStyles.isDarkTheme()
+                    ? UIStyles.getDefaultWidgetBackground()
+                    : display.getSystemColor(SWT.COLOR_WIDGET_BACKGROUND);
             super.setBackground(widgetBackground);
             topNavigationElement.setBackground(widgetBackground);
             bottomNavigationElement.setBackground(widgetBackground);
         } else {
             widgetBackground = getBackground();
         }
-        widgetForeground = UIStyles.getDefaultTextForeground();
+        widgetForeground = UIUtils.isInDialog(this) && !UIStyles.isDarkTheme()
+            ? display.getSystemColor(SWT.COLOR_WIDGET_FOREGROUND)
+            : UIStyles.getDefaultTextForeground();
         widgetDarkShadow = display.getSystemColor(SWT.COLOR_WIDGET_DARK_SHADOW);
         widgetNormalShadow = display.getSystemColor(SWT.COLOR_WIDGET_NORMAL_SHADOW);
 

@@ -23,15 +23,19 @@ import org.jkiss.dbeaver.model.cli.*;
 import org.jkiss.dbeaver.model.cli.help.CLIGlobalOption;
 import org.jkiss.dbeaver.model.cli.model.option.EclipseOptions;
 import org.jkiss.dbeaver.model.cli.model.option.HiddenOptions;
+import org.jkiss.utils.CommonUtils;
 import picocli.CommandLine;
 
 public abstract class AbstractTopLevelCommand extends CLIAbstractCommand implements CommandLine.IExitCodeGenerator {
     private final Log log = Log.getLog(getClass());
 
     public static final String HELP_OPTION = "--help";
+    public static final String SHORT_HELP_OPTION = "-h";
+    public static final String LEGACY_HELP_OPTION = "-help";
     public static final String NOSPASH_OPTION = "-nosplash";
     public static final String DEBUG_LOGS_OPTION = "--debug-logs";
     public static final String TRACE_LOGS_OPTION = "--trace-logs";
+    public static final String OUTPUT_LOG_OPTION = "--output-log";
 
     @CommandLine.Option(names = {"-dump"},
         description = "Print instance thread dump")
@@ -39,7 +43,7 @@ public abstract class AbstractTopLevelCommand extends CLIAbstractCommand impleme
 
 
     @CommandLine.Option(
-        names = {"-h", "-help", HELP_OPTION},
+        names = {SHORT_HELP_OPTION, LEGACY_HELP_OPTION, HELP_OPTION},
         description = "Show this help message and exit",
         usageHelp = true,
         scope = CommandLine.ScopeType.INHERIT
@@ -47,7 +51,7 @@ public abstract class AbstractTopLevelCommand extends CLIAbstractCommand impleme
     private boolean help;
 
     @CommandLine.Option(
-        names = {"-V", "--version"},
+        names = {"-v", "-V", "--version"},
         description = "Print version information and exit",
         versionHelp = true,
         scope = CommandLine.ScopeType.INHERIT
@@ -67,6 +71,14 @@ public abstract class AbstractTopLevelCommand extends CLIAbstractCommand impleme
         hidden = true
     )
     private boolean traceLogs;
+
+    @CLIGlobalOption
+    @CommandLine.Option(names = {OUTPUT_LOG_OPTION},
+        arity = "1",
+        description = "Status/log output format",
+        scope = CommandLine.ScopeType.INHERIT
+    )
+    private String outputLog;
 
     @CommandLine.Mixin
     private EclipseOptions eclipseOptions;
@@ -93,7 +105,8 @@ public abstract class AbstractTopLevelCommand extends CLIAbstractCommand impleme
     }
 
     @Override
-    public void run() {
+    public void run() throws CLIException {
+        applyLogFormat();
         if (debugLogs || traceLogs) {
             Log.setLogHandler(null);
             if (traceLogs) {
@@ -116,6 +129,21 @@ public abstract class AbstractTopLevelCommand extends CLIAbstractCommand impleme
             log.error("Error executing command", e);
             code = CLIConstants.EXIT_CODE_ERROR;
         }
+    }
+
+    private void applyLogFormat() throws CLIException {
+        if (CommonUtils.isEmpty(outputLog)) {
+            return;
+        }
+        CLILogFormat format = CLILogFormat.byName(outputLog);
+        if (format == null) {
+            throw new CLIException(
+                "Invalid " + OUTPUT_LOG_OPTION + " value '" + outputLog + "'. Expected '"
+                    + CLILogFormat.TEXT.getFormatName() + "' or '" + CLILogFormat.JSON.getFormatName() + "'",
+                CLIConstants.EXIT_CODE_ILLEGAL_ARGUMENTS
+            );
+        }
+        context.setLogFormat(format);
     }
 
     @Override

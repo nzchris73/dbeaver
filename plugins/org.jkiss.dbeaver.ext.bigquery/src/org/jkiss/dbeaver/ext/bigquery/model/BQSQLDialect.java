@@ -18,9 +18,19 @@ package org.jkiss.dbeaver.ext.bigquery.model;
 
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.ext.generic.model.GenericSQLDialect;
+import org.jkiss.dbeaver.model.exec.jdbc.JDBCDatabaseMetaData;
+import org.jkiss.dbeaver.model.exec.jdbc.JDBCSession;
+import org.jkiss.dbeaver.model.impl.jdbc.JDBCDataSource;
 import org.jkiss.dbeaver.model.sql.SQLConstants;
+import org.jkiss.dbeaver.model.sql.SQLDialectFeatures;
+import org.jkiss.dbeaver.model.sql.SQLScriptVariableScope;
+import org.jkiss.dbeaver.model.sql.parser.SQLParserActionKind;
+import org.jkiss.dbeaver.model.sql.parser.tokens.predicates.TokenPredicateFactory;
+import org.jkiss.dbeaver.model.sql.parser.tokens.predicates.TokenPredicateSet;
+import org.jkiss.dbeaver.model.sql.parser.tokens.predicates.TokenPredicatesCondition;
 
 import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * BigQuery SQL dialect
@@ -41,6 +51,12 @@ public class BQSQLDialect extends GenericSQLDialect {
 
     public BQSQLDialect() {
         super("BigQuery", "google_bigquery");
+    }
+
+    @NotNull
+    @Override
+    public SQLScriptVariableScope getScriptVariableScope() {
+        return SQLScriptVariableScope.SCRIPT;
     }
 
     @NotNull
@@ -76,12 +92,91 @@ public class BQSQLDialect extends GenericSQLDialect {
     }
 
     @Override
-    public EnumSet<ProjectionAliasVisibilityScope> getProjectionAliasVisibilityScope() {
-        // column alias of is not visible in WHERE, but visible in other projection clauses
-        return EnumSet.of(
-            ProjectionAliasVisibilityScope.GROUP_BY,
-            ProjectionAliasVisibilityScope.HAVING,
-            ProjectionAliasVisibilityScope.ORDER_BY
-        );
+    public void initDriverSettings(@NotNull JDBCSession session, @NotNull JDBCDataSource dataSource, @NotNull JDBCDatabaseMetaData metaData) {
+        super.initDriverSettings(session, dataSource, metaData);
+        super.cachedDialectSkipTokenPredicates = this.makeDialectSkipTokenPredicates(dataSource);
+    }
+
+    @NotNull
+    @Override
+    protected TokenPredicateSet makeDialectSkipTokenPredicatesImpl(@NotNull JDBCDataSource dataSource, @NotNull TokenPredicateFactory tt) {
+        return TokenPredicateSet.of(new TokenPredicatesCondition(
+            SQLParserActionKind.END_BLOCK,
+            tt.sequence(
+                tt.alternative(
+                    "CREATE", "ALTER", "DROP", "UNDROP", "BEGIN"
+                )
+            ),
+            tt.sequence(
+                tt.alternative(
+                    "SCHEMA",
+                    "CONNECTION",
+                    "MODEL",
+                    "GRAPH",
+                    "FUNCTION",
+                    "PROCEDURE",
+                    "TABLE",
+                    "VIEW",
+                    "INDEX",
+                    "POLICY",
+                    "DATA_POLICY",
+                    "COLUMN",
+                    "CONSTRAINT",
+                    "KEY",
+                    "CAPACITY",
+                    "RESERVATION",
+                    "ASSIGNMENT"
+                ),
+                "IF", tt.optional("NOT"), "EXISTS"
+            )
+        ));
+    }
+
+    @NotNull
+    @Override
+    public SQLDialectFeatures getDialectFeatures() {
+        return DialectFeatures.INSTANCE;
+    }
+
+    private static final class DialectFeatures extends SQLDialectFeatures {
+
+        private static final DialectFeatures INSTANCE = new DialectFeatures();
+
+        /** BigQuery resolves a same-named column before a user-created variable in SQL.
+
+         * @see <a href="https://cloud.google.com/bigquery/docs/multi-statement-queries#reference_a_user-created_variable">Variable references</a>
+         */
+        @NotNull
+        @Override
+        public ProceduralVariableConflictPolicy getProceduralVariableConflictPolicy() {
+            return ProceduralVariableConflictPolicy.PREFER_COLUMN;
+        }
+
+        @NotNull
+        @Override
+        public Set<String> getSignatureModifierKeywords() {
+            return Set.of("IN", "OUT", "INOUT");
+        }
+
+        /** BigQuery forbids redeclaring a variable in the current or a containing block.
+
+         * @see <a href="https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#declare">DECLARE</a>
+         */
+        @NotNull
+        @Override
+        public LocalVariableShadowing getLocalVariableShadowing(@NotNull LocalVariableKind kind) {
+            return kind.canBeValue ? LocalVariableShadowing.REJECT_VISIBLE : LocalVariableShadowing.ALLOW_OUTER;
+        }
+
+        @NotNull
+        @Override
+        public EnumSet<ProjectionAliasVisibilityScope> getProjectionAliasVisibilityScope() {
+            // column alias of is not visible in WHERE, but visible in other projection clauses
+            return EnumSet.of(
+                ProjectionAliasVisibilityScope.GROUP_BY,
+                ProjectionAliasVisibilityScope.HAVING,
+                ProjectionAliasVisibilityScope.ORDER_BY
+            );
+        }
     }
 }

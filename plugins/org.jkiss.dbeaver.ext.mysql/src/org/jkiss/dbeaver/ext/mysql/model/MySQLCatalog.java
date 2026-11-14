@@ -322,9 +322,18 @@ public class MySQLCatalog implements
     }
 
     @Association
-    public Collection<MySQLTableIndex> getIndexes(DBRProgressMonitor monitor) throws DBException {
+    @NotNull
+    public Collection<MySQLTableIndex> getIndexes(@NotNull DBRProgressMonitor monitor) throws DBException {
+        return getIndexes(monitor, null);
+    }
+
+    @NotNull
+    public Collection<MySQLTableIndex> getIndexes(
+        @NotNull DBRProgressMonitor monitor,
+        @Nullable MySQLTable table
+    ) throws DBException {
         return getDataSource().supportsInformationSchema() ?
-                indexCache.getObjects(monitor, this, null) :
+                getIndexCache().getObjects(monitor, this, table) :
                 Collections.emptyList();
     }
 
@@ -429,7 +438,7 @@ public class MySQLCatalog implements
         monitor.subTask("Cache tables");
         getTableCache().getAllObjects(monitor, this);
         if ((scope & STRUCT_ENTITIES) != 0) {
-            indexCache.getAllObjects(monitor, this);
+            getIndexCache().getAllObjects(monitor, this);
         }
         if ((scope & STRUCT_ATTRIBUTES) != 0) {
             monitor.subTask("Cache table columns");
@@ -541,7 +550,7 @@ public class MySQLCatalog implements
         tableAdditionalInfoCached = false;
         databaseDDL = null;
         getTableCache().clearCache();
-        indexCache.clearCache();
+        getIndexCache().clearCache();
         uniqueKeyCache.clearCache();
         if (getDataSource().supportsCheckConstraints()) {
             checkConstraintCache.clearCache();
@@ -688,9 +697,8 @@ public class MySQLCatalog implements
     /**
      * Index cache implementation
      */
-    static class IndexCache extends JDBCCompositeCache<MySQLCatalog, MySQLTable, MySQLTableIndex, MySQLTableIndexColumn> {
-        IndexCache(TableCache tableCache)
-        {
+    public static class IndexCache extends JDBCCompositeCache<MySQLCatalog, MySQLTable, MySQLTableIndex, MySQLTableIndexColumn> {
+        protected IndexCache(TableCache tableCache) {
             super(tableCache, MySQLTable.class, MySQLConstants.COL_TABLE_NAME, MySQLConstants.COL_INDEX_NAME);
         }
 
@@ -869,24 +877,63 @@ public class MySQLCatalog implements
         @NotNull
         @Override
         protected JDBCStatement prepareObjectsStatement(@NotNull JDBCSession session, @NotNull MySQLCatalog owner, @Nullable MySQLTable forTable) throws SQLException {
-            StringBuilder sql = new StringBuilder(500);
-            sql.append(
-                "SELECT tc.TABLE_NAME, cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE\n" +
-                "FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc, INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc\n" +
-                "WHERE tc.CONSTRAINT_SCHEMA = ?\n" +
-                "AND tc.CONSTRAINT_SCHEMA=cc.CONSTRAINT_SCHEMA AND tc.CONSTRAINT_NAME=cc.CONSTRAINT_NAME\n");
-            if (forTable != null) {
-                sql.append(" AND tc.TABLE_NAME=?\n");
-            }
-            sql.append("ORDER BY tc.TABLE_NAME,cc.CONSTRAINT_NAME");
-
-            JDBCPreparedStatement dbStat = session.prepareStatement(sql.toString());
-            String ownerName = owner.getName();
-            dbStat.setString(1, ownerName);
+            JDBCPreparedStatement dbStat = session.prepareStatement(
+                buildCheckConstraintsQuery(owner.getDataSource().isMariaDB(), forTable != null));
+            dbStat.setString(1, owner.getName());
             if (forTable != null) {
                 dbStat.setString(2, forTable.getName());
             }
             return dbStat;
+        }
+
+        /**
+         * Builds the check constraint lookup used by {@link #prepareObjectsStatement}.
+         *
+         * <p>The schema is bound as the first parameter and, when {@code forSingleTable},
+         * the table name as the second.
+         *
+         * <p>Example: {@code buildCheckConstraintsQuery(true, false)} reads every check
+         * constraint of a MariaDB schema.
+         */
+        @NotNull
+        static String buildCheckConstraintsQuery(boolean mariaDB, boolean forSingleTable) {
+            return mariaDB
+                ? buildMariaDBCheckConstraintsQuery(forSingleTable)
+                : buildMySQLCheckConstraintsQuery(forSingleTable);
+        }
+
+        /**
+         * MariaDB exposes TABLE_NAME in CHECK_CONSTRAINTS, so TABLE_CONSTRAINTS is not needed.
+         *
+         * <p>Joining it is actively harmful there. TABLE_CONSTRAINTS returns no rows to accounts
+         * holding only SELECT on the schema, so read-only users saw no check constraints at all
+         * (dbeaver/dbeaver#41909). It also scopes check constraint names per table, so matching
+         * on schema + name alone mixed up same-named constraints of different tables
+         * (dbeaver/dbeaver#41941).
+         */
+        @NotNull
+        private static String buildMariaDBCheckConstraintsQuery(boolean forSingleTable) {
+            return "SELECT cc.TABLE_NAME, cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE\n" +
+                "FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc\n" +
+                "WHERE cc.CONSTRAINT_SCHEMA = ?\n" +
+                (forSingleTable ? "AND cc.TABLE_NAME = ?\n" : "") +
+                "ORDER BY cc.TABLE_NAME, cc.CONSTRAINT_NAME";
+        }
+
+        /**
+         * MySQL has no TABLE_NAME in CHECK_CONSTRAINTS, so the owning table has to come from
+         * TABLE_CONSTRAINTS. Matching on the name alone is unambiguous there because MySQL
+         * rejects duplicate check constraint names within a schema, and TABLE_CONSTRAINTS is
+         * readable with plain SELECT.
+         */
+        @NotNull
+        private static String buildMySQLCheckConstraintsQuery(boolean forSingleTable) {
+            return "SELECT tc.TABLE_NAME, cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE\n" +
+                "FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc, INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc\n" +
+                "WHERE tc.CONSTRAINT_SCHEMA = ?\n" +
+                "AND tc.CONSTRAINT_SCHEMA=cc.CONSTRAINT_SCHEMA AND tc.CONSTRAINT_NAME=cc.CONSTRAINT_NAME\n" +
+                (forSingleTable ? "AND tc.TABLE_NAME = ?\n" : "") +
+                "ORDER BY tc.TABLE_NAME, cc.CONSTRAINT_NAME";
         }
 
         @Override

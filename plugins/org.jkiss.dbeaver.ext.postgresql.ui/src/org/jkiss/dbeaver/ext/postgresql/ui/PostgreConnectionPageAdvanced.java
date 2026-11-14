@@ -25,6 +25,8 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Text;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.ext.postgresql.PostgreConstants;
 import org.jkiss.dbeaver.ext.postgresql.PostgreMessages;
 import org.jkiss.dbeaver.ext.postgresql.PostgreUtils;
@@ -38,12 +40,15 @@ import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.dialogs.connection.ClientHomesSelector;
 import org.jkiss.dbeaver.ui.dialogs.connection.ConnectionPageAbstract;
+import org.jkiss.dbeaver.ui.internal.UIConnectionMessages;
 import org.jkiss.utils.CommonUtils;
 
 /**
  * PostgreConnectionPageAdvanced
  */
 public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
+    private static final Log log = Log.getLog(PostgreConnectionPageAdvanced.class);
+
     private final PostgreConnectionPage mainPage;
 
     private Text roleText; //TODO: make it a combo and fill it with appropriate roles
@@ -61,7 +66,7 @@ public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
 
     public PostgreConnectionPageAdvanced(@Nullable PostgreConnectionPage mainPage) {
         this.mainPage = mainPage;
-        setTitle("Advanced");
+        setTitle(UIConnectionMessages.dialog_connection_advanced_tab);
         setDescription("PostgreSQL - " + PostgreMessages.dialog_setting_connection_settings);
     }
 
@@ -71,7 +76,7 @@ public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
     }
 
     @Override
-    public void createControl(Composite parent) {
+    public void createControl(@NotNull Composite parent) {
         Composite cfgGroup = new Composite(parent, SWT.NONE);
         GridLayout gl = new GridLayout(1, false);
         cfgGroup.setLayout(gl);
@@ -104,12 +109,15 @@ public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
             }
         }
 
+        Composite settingsColumns = UIUtils.createComposite(cfgGroup, 2);
+        settingsColumns.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+
         {
             Composite secureGroup = UIUtils.createTitledComposite(
-                cfgGroup,
+                settingsColumns,
                 PostgreMessages.dialog_setting_connection_settings,
                 2,
-                GridData.FILL_HORIZONTAL
+                GridData.FILL_HORIZONTAL | GridData.VERTICAL_ALIGN_BEGINNING
             );
 
             showTemplates = UIUtils.createCheckbox(
@@ -157,9 +165,12 @@ public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
             );
         }
 
+        Composite rightColumn = UIUtils.createComposite(settingsColumns, 1);
+        rightColumn.setLayoutData(new GridData(GridData.FILL_HORIZONTAL | GridData.VERTICAL_ALIGN_BEGINNING));
+
         {
             Composite secureGroup = UIUtils.createTitledComposite(
-                cfgGroup,
+                rightColumn,
                 PostgreMessages.dialog_setting_group_sql,
                 2,
                 GridData.HORIZONTAL_ALIGN_BEGINNING
@@ -185,7 +196,7 @@ public class PostgreConnectionPageAdvanced extends ConnectionPageAbstract {
 
         if (serverType.turnOffPreparedStatements()) {
             Composite performanceGroup = UIUtils.createTitledComposite(
-                cfgGroup,
+                rightColumn,
                 PostgreMessages.dialog_setting_group_performance,
                 1,
                 GridData.HORIZONTAL_ALIGN_BEGINNING

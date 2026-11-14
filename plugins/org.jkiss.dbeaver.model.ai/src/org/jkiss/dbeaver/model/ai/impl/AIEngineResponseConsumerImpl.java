@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -71,10 +72,17 @@ class AIEngineResponseConsumerImpl implements AIEngineResponseConsumer {
         this.logResponses = logResponses;
     }
 
+    private Map<String, String> messageMetadata = Map.of();
+
+    @Override
+    public void messageMetadata(@NotNull Map<String, String> metadata) {
+        messageMetadata = Map.copyOf(metadata);
+    }
+
     @Override
     public void nextChunk(@NotNull AIEngineResponseChunk chunk) {
         if (monitor.isCanceled() || !conversation.isActive()) {
-            close(true);
+            close(true, conversation.getState() == AIChatConversation.State.CANCELED);
             return;
         }
         if (chunk.getFunctionCall() != null) {
@@ -95,6 +103,9 @@ class AIEngineResponseConsumerImpl implements AIEngineResponseConsumer {
 
     @Override
     public void error(@NotNull Throwable throwable) {
+        if (closed) {
+            return;
+        }
         if (logResponses) {
             throwable.printStackTrace(System.err);
         }
@@ -131,21 +142,26 @@ class AIEngineResponseConsumerImpl implements AIEngineResponseConsumer {
     }
 
     private void close(boolean finishConversation) {
+        close(finishConversation, false);
+    }
+
+    private void close(boolean finishConversation, boolean isCanceled) {
         if (closed) {
             return;
         }
 
-        AIUsage usage = usageRef.get() != null ? usageRef.get() : new AIUsage(0, 0, 0, 0);
+        AIUsage usage = usageRef.get();
         AIMessageMeta messageMeta = new AIMessageMeta(
             AIMetaTypes.PROMPT,
             engineDescriptor.getId(),
-            engine.getProperties().getModel(),
+            engine.getProperties().getModelDisplayName(),
             usage,
             Duration.between(startTime, Instant.now()),
-            systemPromptLength.get()
+            systemPromptLength.get(),
+            messageMetadata
         );
 
-        chatListener.complete(List.of(messageMeta), finishConversation);
+        chatListener.complete(List.of(messageMeta), finishConversation, isCanceled);
 
         try {
             engine.close();

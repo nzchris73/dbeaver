@@ -16,6 +16,9 @@
  */
 package org.jkiss.dbeaver.model.ai.qm;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
@@ -29,6 +32,7 @@ import org.jkiss.dbeaver.model.ai.engine.AIDatabaseContext;
 import org.jkiss.dbeaver.model.ai.prompt.AIPromptGenerateSql;
 import org.jkiss.dbeaver.model.ai.registry.AIPromptGeneratorDescriptor;
 import org.jkiss.dbeaver.model.ai.registry.AIPromptGeneratorRegistry;
+import org.jkiss.dbeaver.model.ai.registry.AISettingsManager;
 import org.jkiss.dbeaver.model.data.json.JSONUtils;
 import org.jkiss.dbeaver.model.logical.DBSLogicalDataSource;
 import org.jkiss.dbeaver.model.struct.DBSObject;
@@ -37,8 +41,9 @@ import org.jkiss.utils.CommonUtils;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -47,6 +52,8 @@ import java.util.stream.Collectors;
 public class QMAIChatHistoryMapper {
 
     private static final Log log = Log.getLog(QMAIChatHistoryMapper.class);
+    private static final String USAGE_UNAVAILABLE = "dbeaver.usage.unavailable";
+    private static final String EXCEPTION_MESSAGE_PROPERTY = "detailMessage";
 
     @NotNull
     public static QMAIConversationHistory toQMAIChatHistory(
@@ -69,6 +76,8 @@ public class QMAIChatHistoryMapper {
             dataSource,
             chatMessages,
             qmaiContext,
+            conversation.getProfile() == null ? null : conversation.getProfile().getProfileId(),
+            conversation.getProfile() == null ? null : conversation.getProfile().getEngineId(),
             conversation.getNextMessageId(),
             false
         );
@@ -100,14 +109,28 @@ public class QMAIChatHistoryMapper {
             }
         }
 
-        return new AIChatConversation(
+        AISettings aiSettings = AISettingsManager.getInstance().getSettings();
+        AIConfigurationProfile profile;
+        if (history.getProfileId() != null) {
+            profile = aiSettings.getConfigurationOrNull(history.getProfileId());
+            if (profile == null) {
+                log.debug("AI configuration '" + history.getProfileId() + "' not found");
+            }
+        } else {
+            profile = null;
+        }
+
+        AIChatConversation conversation = new AIChatConversation(
             UUID.fromString(history.getId()),
             history.getCaption(),
             generator,
             toAIMessages(assistant, history.getMessages()),
             container,
-            history.getNextMessageId()
+            history.getNextMessageId(),
+            profile
         );
+        conversation.setImagesLoaded(history.areImagesLoaded());
+        return conversation;
     }
 
     @NotNull
@@ -120,10 +143,11 @@ public class QMAIChatHistoryMapper {
                 it.message().getRawDisplayMessage(),
                 Objects.requireNonNull(toQMAIChatRole(it.message().getRole()), "Chat role is null"),
                 getFunctionCallsString(it.message()),
-                toJsonString(it.message().getFunctionResult()),
-                it.message().getTime().toInstant(ZoneOffset.UTC),
+                toFunctionResultJson(it.message().getFunctionResult()),
+                it.message().getTime().atZone(ZoneId.systemDefault()).toInstant(),
                 false,
-                toQMAIMessageMeta(it.message().getMeta())
+                toQMAIMessageMeta(it.message().getMeta()),
+                it.message().getImages().isEmpty() ? null : it.message().getImages()
             );
         }).toList();
     }
@@ -142,6 +166,41 @@ public class QMAIChatHistoryMapper {
             return null;
         }
         return JSONUtils.GSON.toJson(object);
+    }
+
+    @Nullable
+    private static String toFunctionResultJson(@Nullable AIFunctionResult result) {
+        return result == null ? null : JSONUtils.GSON.toJson(new PersistedFunctionResult(result));
+    }
+
+    @NotNull
+    static AIFunctionResult fromFunctionResultJson(@NotNull String json) {
+        PersistedFunctionResult result = Objects.requireNonNull(
+            JSONUtils.GSON.fromJson(json, PersistedFunctionResult.class),
+            "Function result is null"
+        );
+        String value = toString(result.value());
+        Throwable exception = result.exception() == null || result.exception().isJsonNull()
+            ? null
+            : new DBException(toExceptionMessage(result.exception(), value));
+        return new AIFunctionResult(result.type(), value, null, exception);
+    }
+
+    @NotNull
+    private static String toExceptionMessage(@NotNull JsonElement exception, @NotNull String defaultMessage) {
+        if (exception.isJsonObject()) {
+            JsonElement message = exception.getAsJsonObject().get(EXCEPTION_MESSAGE_PROPERTY);
+            return message == null || message.isJsonNull() ? defaultMessage : toString(message);
+        }
+        return toString(exception);
+    }
+
+    @NotNull
+    private static String toString(@Nullable JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return "";
+        }
+        return element.isJsonPrimitive() ? element.getAsString() : element.toString();
     }
 
     @Nullable
@@ -180,7 +239,7 @@ public class QMAIChatHistoryMapper {
                 } else {
                     AIFunctionCall fc = JSONUtils.GSON.fromJson(fcString, AIFunctionCall.class);
                     setFunctionToFunctionCall(assistant, fc);
-                    AIFunctionResult fr = JSONUtils.GSON.fromJson(frString, AIFunctionResult.class);
+                    AIFunctionResult fr = fromFunctionResultJson(frString);
                     aiMessage = new AIMessage(fc, fr, messageTime, messageMetas);
                 }
             } else {
@@ -190,7 +249,7 @@ public class QMAIChatHistoryMapper {
                     it.displayMessage(),
                     messageTime,
                     messageMetas
-                );
+                ).withImages(it.images() == null ? List.of() : it.images());
             }
 
             return new AIChatMessage(it.id(), aiMessage);
@@ -202,6 +261,31 @@ public class QMAIChatHistoryMapper {
         AIFunctionDescriptor function = assistant.getToolboxManager().getFunctionByFullId(fc.getFunctionName());
         if (function != null) {
             fc.setFunction(function);
+        }
+    }
+
+    private record PersistedFunctionResult(
+        @NotNull AIFunctionType type,
+        @NotNull JsonElement value,
+        @Nullable JsonElement exception
+    ) {
+        private PersistedFunctionResult(@NotNull AIFunctionResult result) {
+            this(
+                result.getType(),
+                new JsonPrimitive(CommonUtils.toString(result.getValue())),
+                toJsonElement(result.getException())
+            );
+        }
+
+        @Nullable
+        private static JsonElement toJsonElement(@Nullable Throwable exception) {
+            if (exception == null) {
+                return null;
+            }
+            String message = exception.getMessage();
+            JsonObject object = new JsonObject();
+            object.addProperty(EXCEPTION_MESSAGE_PROPERTY, message != null ? message : exception.toString());
+            return object;
         }
     }
 
@@ -264,23 +348,31 @@ public class QMAIChatHistoryMapper {
             return null;
         }
         return meta.stream()
-            .filter(it -> it.usage() != null)
+            .filter(it -> it.usage() != null || !it.responseMetadata().isEmpty())
             .map(QMAIChatHistoryMapper::toQMAIMessageMeta)
             .toList();
     }
 
     @NotNull
     public static QMAIMessageMeta toQMAIMessageMeta(@NotNull AIMessageMeta meta) {
+        AIUsage usage = meta.usage();
+        Map<String, String> metadata = meta.responseMetadata();
+        if (usage == null) {
+            usage = new AIUsage(0, 0, 0, 0);
+            metadata = new HashMap<>(metadata);
+            metadata.put(USAGE_UNAVAILABLE, Boolean.TRUE.toString());
+        }
         return new QMAIMessageMeta(
             meta.type(),
             meta.engineId(),
             meta.modelId(),
             meta.systemPromptLength(),
             meta.timeSpent(),
-            meta.usage().totalInputTokens(),
-            meta.usage().cachedTokens(),
-            meta.usage().totalOutputTokens(),
-            meta.usage().reasoningTokens()
+            usage.totalInputTokens(),
+            usage.cachedTokens(),
+            usage.totalOutputTokens(),
+            usage.reasoningTokens(),
+            metadata
         );
     }
 
@@ -297,18 +389,21 @@ public class QMAIChatHistoryMapper {
 
     @NotNull
     public static AIMessageMeta toAIMessageMeta(@NotNull QMAIMessageMeta meta) {
+        Map<String, String> metadata = new HashMap<>(meta.responseMetadata());
+        boolean usageUnavailable = Boolean.parseBoolean(metadata.remove(USAGE_UNAVAILABLE));
         return new AIMessageMeta(
             meta.type(),
             meta.engineId(),
             meta.modelId(),
-            new AIUsage(
+            usageUnavailable ? null : new AIUsage(
                 meta.totalInputTokens(),
                 meta.cachedTokens(),
                 meta.totalOutputTokens(),
                 meta.reasoningTokens()
             ),
             meta.timeSpent(),
-            meta.systemPromptLength()
+            meta.systemPromptLength(),
+            metadata
         );
     }
 }

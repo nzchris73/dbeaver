@@ -20,7 +20,6 @@ import org.eclipse.jface.action.*;
 import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.jface.viewers.StructuredViewer;
 import org.eclipse.jface.viewers.Viewer;
-import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.ui.IViewPart;
 import org.eclipse.ui.IViewReference;
@@ -36,9 +35,10 @@ import org.jkiss.dbeaver.model.navigator.DBNDatabaseNode;
 import org.jkiss.dbeaver.registry.DataSourceDescriptor;
 import org.jkiss.dbeaver.registry.DataSourceNavigatorSettings;
 import org.jkiss.dbeaver.registry.DataSourceNavigatorSettingsUtils;
-import org.jkiss.dbeaver.registry.internal.RegistryMessages;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.runtime.ui.UIServiceConnections;
 import org.jkiss.dbeaver.ui.DBeaverIcons;
+import org.jkiss.dbeaver.ui.internal.UIConnectionMessages;
 import org.jkiss.dbeaver.ui.UIIcon;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.actions.AbstractDataSourceHandler;
@@ -60,7 +60,7 @@ public class ConnectionViewSettingsContributor extends DataSourceMenuContributor
             return;
         }
 
-        MenuManager customizeViewMenu = new MenuManager(RegistryMessages.navigator_settings_customize_view);
+        MenuManager customizeViewMenu = new MenuManager(CoreMessages.navigator_settings_customize_view);
         customizeViewMenu.setImageDescriptor(DBeaverIcons.getImageDescriptor(UIIcon.SHOW_ALL_DETAILS));
         addPresetSettings(customizeViewMenu, dsContainer);
         addSystemObjects(customizeViewMenu, dsContainer);
@@ -143,14 +143,9 @@ public class ConnectionViewSettingsContributor extends DataSourceMenuContributor
         }
 
         protected void askToReconnectIfNeeded() {
-            if (dsContainer.isConnected()) {
-                if (UIUtils.confirmAction(
-                    UIUtils.getActiveWorkbenchShell(),
-                    CoreMessages.dialog_connection_edit_wizard_conn_change_title,
-                    NLS.bind(CoreMessages.dialog_connection_edit_wizard_conn_change_question, dsContainer.getName())
-                )) {
-                    DataSourceHandler.reconnectDataSource(null, dsContainer);
-                }
+            UIServiceConnections serviceConnections = DBWorkbench.getService(UIServiceConnections.class);
+            if (serviceConnections != null) {
+                serviceConnections.askToReconnect(dsContainer);
             }
         }
 
@@ -236,8 +231,8 @@ public class ConnectionViewSettingsContributor extends DataSourceMenuContributor
 
     private static class ShowSystemObjectsAction extends SettingsAction {
         ShowSystemObjectsAction(@NotNull DBPDataSourceContainer container) {
-            super(container, CoreMessages.dialog_connection_wizard_final_checkbox_show_system_objects, AS_CHECK_BOX);
-            setToolTipText(CoreMessages.dialog_connection_wizard_final_checkbox_show_system_objects_tip);
+            super(container, UIConnectionMessages.dialog_connection_wizard_final_checkbox_show_system_objects, AS_CHECK_BOX);
+            setToolTipText(UIConnectionMessages.dialog_connection_wizard_final_checkbox_show_system_objects_tip);
             setChecked(container.getNavigatorSettings().isShowSystemObjects());
         }
 
@@ -312,8 +307,8 @@ public class ConnectionViewSettingsContributor extends DataSourceMenuContributor
 
 
         public ClearCurrentUserSettings(@NotNull DBPDataSourceContainer container) {
-            super(container, UINavigatorMessages.dialog_connection_set_default_connection_settings, AS_PUSH_BUTTON);
-            setToolTipText(UINavigatorMessages.dialog_connection_set_default_connection_settings_tip);
+            super(container, CoreMessages.dialog_connection_set_default_connection_settings, AS_PUSH_BUTTON);
+            setToolTipText(CoreMessages.dialog_connection_set_default_connection_settings_tip);
         }
 
         @Override

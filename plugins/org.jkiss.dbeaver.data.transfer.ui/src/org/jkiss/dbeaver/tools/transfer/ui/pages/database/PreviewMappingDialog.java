@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.*;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.DBUtils;
 import org.jkiss.dbeaver.model.DBValueFormatting;
@@ -35,7 +36,6 @@ import org.jkiss.dbeaver.tools.transfer.*;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseConsumerSettings;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseMappingContainer;
 import org.jkiss.dbeaver.tools.transfer.database.DatabaseTransferConsumer;
-import org.jkiss.dbeaver.tools.transfer.internal.DTMessages;
 import org.jkiss.dbeaver.tools.transfer.ui.internal.DTUIMessages;
 import org.jkiss.dbeaver.ui.DBeaverIcons;
 import org.jkiss.dbeaver.ui.UIUtils;
@@ -61,7 +61,7 @@ class PreviewMappingDialog extends BaseProgressDialog {
         DataTransferPipe pipe,
         DatabaseMappingContainer mappingContainer,
         DataTransferSettings dtSettings) {
-        super(parentShell, DTMessages.data_transfer_wizard_page_preview_title + " - " + mappingContainer.getTargetName(), null);
+        super(parentShell, DTUIMessages.data_transfer_wizard_page_preview_title + " - " + mappingContainer.getTargetName(), null);
 
         this.pipe = pipe;
         this.mappingContainer = mappingContainer;
@@ -74,10 +74,11 @@ class PreviewMappingDialog extends BaseProgressDialog {
     }
 
     @Override
-    protected void createButtonsForButtonBar(Composite parent) {
+    protected void createButtonsForButtonBar(@NotNull Composite parent) {
         createButton(parent, IDialogConstants.OK_ID, IDialogConstants.CLOSE_LABEL, true);
     }
 
+    @NotNull
     @Override
     protected Composite createDialogArea(Composite parent) {
         Composite main = super.createDialogArea(parent);
@@ -87,7 +88,7 @@ class PreviewMappingDialog extends BaseProgressDialog {
             Composite previewGroup = new Composite(main, SWT.NONE);
             previewGroup.setLayoutData(new GridData(GridData.FILL_BOTH));
             previewGroup.setLayout(new GridLayout(1, false));
-            UIUtils.createControlLabel(previewGroup, DTMessages.data_transfer_wizard_settings_group_preview);
+            UIUtils.createControlLabel(previewGroup, DTUIMessages.data_transfer_wizard_settings_group_preview);
 
             previewTable = new Table(previewGroup, SWT.BORDER | SWT.SINGLE | SWT.FULL_SELECTION);
             GridData gd = new GridData(GridData.FILL_BOTH);
@@ -136,7 +137,7 @@ class PreviewMappingDialog extends BaseProgressDialog {
 
     private void loadImportPreview(
         DBRProgressMonitor monitor) throws DBException {
-        PreviewConsumer previewConsumer = new PreviewConsumer(monitor, mappingContainer, previewRowCount);
+        PreviewConsumer previewConsumer = new PreviewConsumer(monitor, mappingContainer);
 
         IDataTransferProducer producer = pipe.getProducer();
         IDataTransferSettings producerSettings = dtSettings.getNodeSettings(producer);
@@ -155,7 +156,9 @@ class PreviewMappingDialog extends BaseProgressDialog {
                     previewConsumer,
                     dtSettings.getProcessor() == null ? null : dtSettings.getProcessor().getInstance(),
                     producerSettings,
-                    null);
+                    null,
+                    previewRowCount
+                );
             } finally {
                 pipe.setConsumer(realConsumer);
             }
@@ -167,8 +170,8 @@ class PreviewMappingDialog extends BaseProgressDialog {
         List<String[]> strRows = new ArrayList<>(rows.size());
         DBSObject target = mappingContainer.getTarget();
         if (target == null) {
-            if (consumerSettings instanceof DatabaseConsumerSettings) {
-                target = ((DatabaseConsumerSettings) consumerSettings).getContainer();
+            if (consumerSettings instanceof DatabaseConsumerSettings dcs) {
+                target = dcs.getContainer();
             }
         }
         if (target == null) {

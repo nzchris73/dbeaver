@@ -23,6 +23,8 @@ import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.ext.mssql.SQLServerConstants;
 import org.jkiss.dbeaver.ext.mssql.SQLServerUtils;
 import org.jkiss.dbeaver.model.*;
+import org.jkiss.dbeaver.model.exec.DBCException;
+import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
 import org.jkiss.dbeaver.model.exec.jdbc.JDBCPreparedStatement;
 import org.jkiss.dbeaver.model.exec.jdbc.JDBCResultSet;
 import org.jkiss.dbeaver.model.exec.jdbc.JDBCSession;
@@ -36,16 +38,24 @@ import org.jkiss.dbeaver.model.meta.PropertyLength;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.runtime.VoidProgressMonitor;
 import org.jkiss.dbeaver.model.sql.DBSQLException;
+import org.jkiss.dbeaver.model.struct.DBSCollationProvider;
 import org.jkiss.dbeaver.model.struct.DBSObject;
 import org.jkiss.dbeaver.model.struct.DBSObjectFilter;
+import org.jkiss.dbeaver.model.struct.DBSObjectState;
 import org.jkiss.dbeaver.model.struct.rdb.DBSCatalog;
 import org.jkiss.utils.ArrayUtils;
 import org.jkiss.utils.CommonUtils;
 import org.jkiss.utils.LongKeyMap;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
+import java.util.NavigableSet;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
 * SQL Server database
@@ -57,9 +67,27 @@ public class SQLServerDatabase
         DBPRefreshableObject,
         DBPSystemObject,
         DBPNamedObject2,
-        DBPObjectStatistics {
+        DBPObjectStatistics,
+        DBPObjectWithLazyDescription,
+        DBPStatefulObject,
+        DBSCollationProvider {
 
     private static final Log log = Log.getLog(SQLServerDatabase.class);
+
+    // uniqueidentifier and xml are deliberately not here: their data kind is STRING/CONTENT
+    // but SQL Server rejects COLLATE on them
+    private static final Set<String> COLLATABLE_TYPES = Set.of(
+        SQLServerConstants.TYPE_CHAR,
+        SQLServerConstants.TYPE_NCHAR,
+        SQLServerConstants.TYPE_VARCHAR,
+        SQLServerConstants.TYPE_NVARCHAR,
+        SQLServerConstants.TYPE_TEXT,
+        SQLServerConstants.TYPE_NTEXT,
+        SQLServerConstants.TYPE_SYSNAME);
+
+    // trailing parts of a collation name which select sensitivity options rather than the language
+    private static final Set<String> COLLATION_FLAGS = Set.of(
+        "CI", "CS", "AI", "AS", "KS", "WS", "BIN", "BIN2", "SC", "UTF8");
 
     private final SQLServerDataSource dataSource;
     private final long databaseId;
@@ -67,6 +95,10 @@ public class SQLServerDatabase
     private boolean persisted;
     private String name;
     private String description;
+    private String stateDesc;
+    private DBSObjectState objectState = DBSObjectState.NORMAL;
+    private String collationName;
+    private volatile NavigableSet<String> supportedCollations;
     private DataTypeCache typesCache = new DataTypeCache();
     private SchemaCache schemaCache = new SchemaCache();
     private TriggerCache triggerCache = new TriggerCache();
@@ -83,7 +115,9 @@ public class SQLServerDatabase
         this.databaseId = JDBCUtils.safeGetLong(resultSet, "database_id");
         this.name = name;
         this.isTempDatabase = name.equalsIgnoreCase(SQLServerConstants.TEMPDB_DATABASE);
+        this.collationName = JDBCUtils.safeGetString(resultSet, "collation_name");
         //this.description = JDBCUtils.safeGetString(resultSet, "description");
+        setStateDesc(JDBCUtils.safeGetString(resultSet, "state_desc"));
 
         this.persisted = true;
 
@@ -124,14 +158,98 @@ public class SQLServerDatabase
         name = newName;
     }
 
+    @Nullable
     @Override
-    @Property(viewable = true, editable = true, updatable = true, length = PropertyLength.MULTILINE, order = 100)
     public String getDescription() {
         return description;
     }
 
+    @Nullable
+    @Override
+    @Property(viewable = true, editable = true, updatable = true, length = PropertyLength.MULTILINE, order = 100)
+    public String getDescription(@NotNull DBRProgressMonitor monitor) {
+        if (description != null) {
+            return description;
+        }
+        // Database-level extended properties live in the database itself, so they cannot be read
+        // together with the database list and are not readable at all while the database is not online
+        if (!isExtendedPropertyAddressable(DBUtils.getDefaultContext(this, false))) {
+            // Left uncached - the property becomes readable once the connection switches to this database
+            return "";
+        }
+        try (JDBCSession session = DBUtils.openUtilSession(monitor, this, "Read database description")) {
+            description = JDBCUtils.queryString(
+                session,
+                "SELECT CAST([value] AS nvarchar(max)) FROM " + SQLServerUtils.getExtendedPropsTableName(this) +
+                    " WHERE [class] = ? AND [major_id] = 0 AND [minor_id] = 0 AND [name] = ?",
+                SQLServerObjectClass.DATABASE.getClassId(),
+                SQLServerConstants.PROP_MS_DESCRIPTION);
+        } catch (Exception e) {
+            log.debug("Error reading description of database " + getName(), e);
+        }
+        if (description == null) {
+            description = "";
+        }
+        return description;
+    }
+
+    /**
+     * Without cross-database queries the extended properties table cannot be qualified with a catalog name,
+     * so it resolves inside the database the connection currently uses - addressing it for any other database
+     * would read or write that one's properties instead.
+     */
+    public boolean isExtendedPropertyAddressable(@Nullable DBCExecutionContext executionContext) {
+        if (SQLServerUtils.supportsCrossDatabaseQueries(dataSource)) {
+            return true;
+        }
+        return executionContext instanceof SQLServerExecutionContext context && this == context.getDefaultCatalog();
+    }
+
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    @Nullable
+    @Property(viewable = true, order = 5)
+    public String getState() {
+        return stateDesc;
+    }
+
+    @NotNull
+    @Override
+    public DBSObjectState getObjectState() {
+        return objectState;
+    }
+
+    @Override
+    public void refreshObjectState(@NotNull DBRProgressMonitor monitor) throws DBCException {
+        // Queried on the data source context, because an offline database cannot host the query itself,
+        // and read the same way the database list reads it, so a server that does not expose the column
+        // leaves the database unmarked here as well instead of failing the refresh
+        try (JDBCSession session = DBUtils.openMetaSession(monitor, dataSource, "Read database state")) {
+            try (JDBCPreparedStatement dbStat = session.prepareStatement(
+                "SELECT db.* FROM sys.databases db WHERE db.database_id = ?"))
+            {
+                dbStat.setLong(1, databaseId);
+                try (JDBCResultSet dbResult = dbStat.executeQuery()) {
+                    if (dbResult.next()) {
+                        setStateDesc(JDBCUtils.safeGetString(dbResult, "state_desc"));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw new DBCException("Error reading database state", e);
+        }
+    }
+
+    private void setStateDesc(@Nullable String stateDesc) {
+        this.stateDesc = stateDesc;
+        if (stateDesc == null || SQLServerConstants.DATABASE_STATE_ONLINE.equalsIgnoreCase(stateDesc)) {
+            // A server that does not report a state leaves the database unmarked
+            this.objectState = DBSObjectState.NORMAL;
+        } else {
+            this.objectState = new DBSObjectState(stateDesc, DBIcon.OVER_ERROR);
+        }
     }
 
     public long getDatabaseId() {
@@ -170,6 +288,13 @@ public class SQLServerDatabase
         schemaCache.clearCache();
         triggerCache.clearCache();
         databaseTotalSize = null;
+        description = null;
+        supportedCollations = null;
+        try {
+            refreshObjectState(monitor);
+        } catch (DBCException e) {
+            log.debug("Error refreshing database state", e);
+        }
         return this;
     }
 
@@ -182,6 +307,95 @@ public class SQLServerDatabase
      */
     public boolean isTempDatabase() {
         return isTempDatabase;
+    }
+
+    //////////////////////////////////////////////////
+    // Collations
+
+    @Nullable
+    @Override
+    @Property(viewable = true, order = 20)
+    public String getDefaultCollation() {
+        return collationName;
+    }
+
+    @Override
+    public boolean isCollatableType(@NotNull String typeName) {
+        return COLLATABLE_TYPES.contains(typeName.toLowerCase(Locale.ENGLISH));
+    }
+
+    @Override
+    public boolean isCollationSupported(@NotNull DBRProgressMonitor monitor, @NotNull String collationName) {
+        NavigableSet<String> collations = getSupportedCollations(monitor);
+        // an unreadable list must not reject anything
+        return collations.isEmpty() || collations.contains(collationName);
+    }
+
+    @NotNull
+    @Override
+    public List<String> getRelatedCollations(@NotNull DBRProgressMonitor monitor, @Nullable String collationName) {
+        String family = getCollationFamily(collationName);
+        if (family == null) {
+            return List.of();
+        }
+        List<String> related = new ArrayList<>();
+        for (String collation : getSupportedCollations(monitor)) {
+            if (collation.regionMatches(true, 0, family, 0, family.length())) {
+                related.add(collation);
+            }
+        }
+        return related;
+    }
+
+    @NotNull
+    private NavigableSet<String> getSupportedCollations(@NotNull DBRProgressMonitor monitor) {
+        if (supportedCollations == null) {
+            supportedCollations = readSupportedCollations(monitor);
+        }
+        return supportedCollations;
+    }
+
+    @NotNull
+    private NavigableSet<String> readSupportedCollations(@NotNull DBRProgressMonitor monitor) {
+        NavigableSet<String> collations = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        try (JDBCSession session = DBUtils.openMetaSession(monitor, this, "Read supported collations")) {
+            try (JDBCPreparedStatement dbStat = session.prepareStatement(
+                "SELECT name FROM sys.fn_helpcollations() ORDER BY name")) {
+                try (JDBCResultSet dbResult = dbStat.executeQuery()) {
+                    while (dbResult.next()) {
+                        String collation = JDBCUtils.safeGetString(dbResult, "name");
+                        if (!CommonUtils.isEmpty(collation)) {
+                            collations.add(collation);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // not every SQL Server flavor exposes fn_helpcollations, e.g. Synapse.
+            // an empty set means "unknown" and disables validation, refreshObject retries the read
+            log.debug("Can't read supported collations", e);
+        }
+        return collations;
+    }
+
+    /**
+     * Name prefix shared by collations which differ only in sensitivity flags,
+     * e.g. Danish_Norwegian_CI_AS -> Danish_Norwegian_. Null if no flags can be stripped.
+     */
+    @Nullable
+    private static String getCollationFamily(@Nullable String collation) {
+        if (CommonUtils.isEmpty(collation)) {
+            return null;
+        }
+        String[] parts = collation.split("_");
+        int end = parts.length;
+        while (end > 1 && COLLATION_FLAGS.contains(parts[end - 1].toUpperCase(Locale.ENGLISH))) {
+            end--;
+        }
+        if (end == parts.length) {
+            return null;
+        }
+        return String.join("_", Arrays.copyOfRange(parts, 0, end)) + "_";
     }
 
     //////////////////////////////////////////////////
